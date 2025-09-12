@@ -14,6 +14,7 @@ from skrl.envs.wrappers.torch.isaaclab_envs import IsaacLabMultiAgentWrapper, Is
 from skrl.envs.wrappers.torch.omniverse_isaacgym_envs import OmniverseIsaacGymWrapper
 from skrl.envs.wrappers.torch.pettingzoo_envs import PettingZooWrapper
 from skrl.envs.wrappers.torch.robosuite_envs import RobosuiteWrapper
+from skrl.envs.wrappers.torch.genesis_envs import GenesisWrapper, GenesisMultiAgentWrapper
 
 
 __all__ = ["wrap_env", "Wrapper", "MultiAgentEnvWrapper"]
@@ -191,5 +192,9 @@ def wrap_env(env: Any, wrapper: str = "auto", verbose: bool = True) -> Union[Wra
         if verbose:
             logger.info(f"Environment wrapper: Isaac Lab ({env_type})")
         return env_wrapper(env)
+    elif wrapper=='genesis':
+        return GenesisWrapper(env)
+    elif wrapper=='genesis-multi':
+        return GenesisMultiAgentWrapper(env)
     else:
         raise ValueError(f"Unknown wrapper type: {wrapper}")

@@ -63,7 +63,8 @@ gym.register(id="PendulumNoVel-v1", entry_point=lambda: NoVelocityWrapper(gym.ma
 # load and wrap the gymnasium environment
 env = gym.make("PendulumNoVel-v1")
 env = wrap_env(env)
-
+print("action space")
+print(env.action_space)
 device = env.device
 
 

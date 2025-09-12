@@ -44,6 +44,8 @@ except (gym.error.DeprecatedEnv, gym.error.VersionNotFound) as e:
     print("Taxi-v3 not found. Trying {}".format(env_id))
     env = gym.make(env_id)
 env = wrap_env(env)
+print("action space")
+print(env.action_space)
 
 device = env.device
 

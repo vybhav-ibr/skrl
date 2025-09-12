@@ -90,7 +90,7 @@ class DeepMindWrapper(Wrapper):
         terminated = timestep.last()
         truncated = False
         info = {}
-
+        print("obs stepped:",observation.shape)
         # convert response to torch
         return (
             observation,
