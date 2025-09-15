@@ -73,7 +73,7 @@ def get_cfgs():
              ["LF_FOOT","plane"],
              ["RH_FOOT","plane"]],
         # base pose
-        "base_init_pos": [0.0, 0.0, 0.42],
+        "base_init_pos": [0.0, 0.0, 0.52],
         "base_init_quat": [1.0, 0.0, 0.0, 0.0],
         "episode_length_s": 20.0,
         "resampling_time_s": 4.0,

@@ -73,7 +73,7 @@ def get_cfgs():
              ["LF_FOOT","plane"],
              ["RH_FOOT","plane"]],
         # base pose
-        "base_init_pos": [0.0, 0.0, 0.50],
+        "base_init_pos": [0.0, 0.0, 0.52],
         "base_init_quat": [1.0, 0.0, 0.0, 0.0],
         "episode_length_s": 25.0,
         "resampling_time_s": 4.0,
@@ -96,8 +96,8 @@ def get_cfgs():
         },
     }
     reward_cfg = {
-        "base_height_target": 0.50,
-        "eef_pos_object_threshold":0.5,
+        "base_height_target": 0.47,
+        "eef_pos_object_threshold":0.25,
         "reward_scales": {
             # "survival":100.0,
             # "home":10.0,
@@ -105,10 +105,11 @@ def get_cfgs():
             # "pick_grasp_object":1.0,
             # "place_ungrasp_object":1.0,
             # "place_object_pos_basket":1.0,
-            "goto":50,
+            "goto":5.0,
             "high_joint_force":-0.005,
-            "action_rate":-0.1,
-            "base_height":-100.0,
+            "action_rate":-0.01,
+            "base_height":-1.0,
+            "goal_proximity":0.1
         }
     }
     command_cfg = {

@@ -88,7 +88,7 @@ class APWEnv:
         self.inv_base_init_quat = inv_quat(self.base_init_quat)
         self.robot = self.scene.add_entity(
             gs.morphs.URDF(
-                file="anymal_d/urdf/anymal_d.urdf",
+                file="/home/vybhav/gs_gym_wrapper_reference/anymal_d/urdf/anymal_d.urdf",
                 pos=self.base_init_pos.cpu().numpy(),
                 quat=self.base_init_quat.cpu().numpy(),
                 links_to_keep=self.env_cfg["links_to_keep"]
@@ -409,7 +409,7 @@ class APWEnv:
         self.actions = torch.clip(actions, -self.env_cfg["clip_actions"], self.env_cfg["clip_actions"])
         exec_actions = self.last_actions if self.simulate_action_latency else self.actions
         target_dof_pos = exec_actions * self.env_cfg["action_scale"] + self.default_dof_pos
-        self.robot.control_dofs_position(target_dof_pos, self.motors_dof_idx)
+        self.robot.set_dofs_position(target_dof_pos, self.motors_dof_idx)
         self.scene.step()
 
         # update buffers

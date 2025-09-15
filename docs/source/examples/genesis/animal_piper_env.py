@@ -88,7 +88,7 @@ class APEnv:
         self.inv_base_init_quat = inv_quat(self.base_init_quat)
         self.robot = self.scene.add_entity(
             gs.morphs.URDF(
-                file="anymal_d/urdf/anymal_d.urdf",
+                file="/home/vybhav/gs_gym_wrapper_reference/anymal_d/urdf/anymal_d.urdf",
                 pos=self.base_init_pos.cpu().numpy(),
                 quat=self.base_init_quat.cpu().numpy(),
                 links_to_keep=self.env_cfg["links_to_keep"]
