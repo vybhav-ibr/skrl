@@ -89,7 +89,7 @@ def get_cfgs():
     }
     command_cfg = {
         "num_commands": 3,
-        "lin_vel_x_range": [0.5, 0.5],
+        "lin_vel_x_range": [-1.5, 1.5],
         "lin_vel_y_range": [0, 0],
         "ang_vel_range": [0, 0],
     }
@@ -217,14 +217,14 @@ cfg_trainer = {"timesteps": args.max_timesteps, "headless": True}
 trainer = SequentialTrainer(cfg=cfg_trainer, env=env, agents=agent)
 
 # start training
-# trainer.train()
+trainer.train()
 
 # from skrl.utils.huggingface import download_model_from_huggingface
 
 # # download the trained agent's checkpoint from Hugging Face Hub and load it
-path = "/home/vybhav/gs_gym_wrapper_reference/runs/torch/Go2/25-08-24_15-56-19-148207_PPO/checkpoints/agent_30000.pt"
-agent.load(path)
+# path = "/home/vybhav/gs_gym_wrapper_reference/runs/torch/Go2/25-08-24_15-56-19-148207_PPO/checkpoints/agent_30000.pt"
+# agent.load(path)
 
-# # start evaluation
-trainer.eval()
+# # # start evaluation
+# trainer.eval()
 

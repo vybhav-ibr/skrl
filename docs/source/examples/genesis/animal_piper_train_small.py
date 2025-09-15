@@ -116,12 +116,13 @@ def get_cfgs():
         "home":[True,False],
         
         "pick":[True,False],
-        "place":[True,False],
         # "deliver":[True,False],
         
         "goto":[True,False],
         "goto_pos": [[0,5],[-0.5,0.5],[0.65,0.35]],
         "goto_quat": [[-1,1],[-1,1],[-1,1],[-1,1]],
+        
+        "place":[True,False],
     }
 
     return env_cfg, obs_cfg, reward_cfg, command_cfg
@@ -130,6 +131,7 @@ def get_cfgs():
 parser = argparse.ArgumentParser()
 parser.add_argument("-e", "--exp_name", type=str, default="animal-piper-small")
 parser.add_argument("-B", "--num_envs", type=int, default=10)
+parser.add_argument("--vis",action="store_true")
 parser.add_argument("--max_iterations", type=int, default=101)
 args = parser.parse_args()
 
@@ -137,7 +139,7 @@ gs.init(logging_level="warning",precision="32")
 env_cfg, obs_cfg, reward_cfg, command_cfg = get_cfgs()
 
 env = APEnv(
-    num_envs=args.num_envs, env_cfg=env_cfg, obs_cfg=obs_cfg, reward_cfg=reward_cfg, command_cfg=command_cfg
+    num_envs=args.num_envs, env_cfg=env_cfg, obs_cfg=obs_cfg, reward_cfg=reward_cfg, command_cfg=command_cfg, show_viewer=args.vis
 )
 # env.step()
 env=wrap_env(env,wrapper='genesis')
@@ -196,9 +198,9 @@ class YOLOForegroundExtractor(nn.Module):
     def forward(self, rgb_images):
         B, _, H, W = rgb_images.shape
         device = rgb_images.device
-
-        if rgb_images.max() > 1.5:
-            rgb_images = rgb_images / 255.0
+        # print("rgb_images shape in fg extractor:",rgb_images.shape)
+        # if rgb_images.max() > 1.5:
+        #     rgb_images = rgb_images / 255.0
         rgb_images = self.normalizer(rgb_images)
 
         foreground_masks = []
@@ -371,8 +373,12 @@ class Shared(GaussianMixin, DeterministicMixin, Model):
         space = self.tensor_to_space(states, self.observation_space)
         
         # Extract RGB images (front_cloud is assumed to be RGB)
+        shapes_dict={}
+        for key,value in space.items():
+            shapes_dict[key]=value.shape
+        # print(shapes_dict)
         rgb_images = space['gripper_img'].permute(0, 3, 1, 2).float()  # [B, 3, H, W]
-        
+        rgb_shape=rgb_images.shape
         # Get depth images - check if available in observation space
         depth_images = space['gripper_depth'].permute(0, 3, 1, 2).float()  # [B, 1, H, W]
 

@@ -24,7 +24,7 @@ def gs_rand_float(command, shape, device):
         sampled.append(sample.unsqueeze(1))  # shape: [n, 1]
     return torch.cat(sampled, dim=1)  # shape: [n, 3]
 
-class APEnv:
+class APWEnv:
     def __init__(self, num_envs, env_cfg, obs_cfg, reward_cfg, command_cfg, show_viewer=False):
         self.num_envs = num_envs
         self.num_obs = obs_cfg["num_obs"]
@@ -82,7 +82,7 @@ class APEnv:
         #     ),
         # )
 
-        # add robot
+        # # add robot
         self.base_init_pos = torch.tensor(self.env_cfg["base_init_pos"], device=gs.device)
         self.base_init_quat = torch.tensor(self.env_cfg["base_init_quat"], device=gs.device)
         self.inv_base_init_quat = inv_quat(self.base_init_quat)
@@ -95,54 +95,55 @@ class APEnv:
             ),
             visualize_contact=True
         )
-        self.basket=self.scene.add_entity(
-            gs.morphs.Mesh(
-                file="meshes/tank.obj",
-                scale=5.0,
-                fixed=True,
-                pos=(5.0,0,0),
-                euler=(90, 0, 90),
-                # euler=(80, 10, 90),
-            ),
-             surface=gs.surfaces.Rough(
-                diffuse_texture=gs.textures.ColorTexture(
-                    color=(0/255, 165/225, 255/255),
-                ),
-            ),
-            # vis_mode="collision",
-        )
-        self.all_scene_objects=[]
-        for i, asset_name in enumerate(("donut_0", "mug_1", "cup_2", "apple_15")):
-            asset_path = snapshot_download(
-                repo_type="dataset", repo_id="Genesis-Intelligence/assets", allow_patterns=f"{asset_name}/*"
-            )
-            self.all_scene_objects.append(self.scene.add_entity(
-                gs.morphs.MJCF(
-                    file=f"{asset_path}/{asset_name}/output.xml",
-                    pos=(5.0, 0.15 * (i - 1.5), 0.7),
-                ),
-                # vis_mode="collision",
-                # visualize_contact=True,
-            )
-            )
-            
-        link=self.robot.get_link("depth_camera_front_lower_camera")
-        self.front_cams = [self.scene.add_camera(GUI=False, fov=70,env_idx=i,res=(128,128)) for i in range(num_envs)]
-        T=np.array([[  0.00,   0.00,  -1.00,   0.00],
-                    [ -1.00,   0.00,   0.00,   0.00],
-                    [  0.00,   1.00,   0.00,   0.00],
-                    [  0.00,   0.00,   0.00,   1.00]])
-        for cam in self.front_cams:
-            cam.attach(link, T)
         
-        link=self.robot.get_link("depth_camera_rear_lower_camera")
-        self.back_cams = [self.scene.add_camera(GUI=False, fov=70,env_idx=i,res=(128,128)) for i in range(num_envs)]
-        T=np.array([[  0.00,   0.00,  -1.00,   0.00],
-                    [ -1.00,   0.00,   0.00,   0.00],
-                    [  0.00,   1.00,   0.00,   0.00],
-                    [  0.00,   0.00,   0.00,   1.00]])
-        for cam in self.back_cams:
-            cam.attach(link, T)
+        # self.basket=self.scene.add_entity(
+        #     gs.morphs.Mesh(
+        #         file="meshes/tank.obj",
+        #         scale=5.0,
+        #         fixed=True,
+        #         pos=(5.0,0,0),
+        #         euler=(90, 0, 90),
+        #         # euler=(80, 10, 90),
+        #     ),
+        #      surface=gs.surfaces.Rough(
+        #         diffuse_texture=gs.textures.ColorTexture(
+        #             color=(0/255, 165/225, 255/255),
+        #         ),
+        #     ),
+        #     # vis_mode="collision",
+        # )
+        # self.all_scene_objects=[]
+        # for i, asset_name in enumerate(("donut_0", "mug_1", "cup_2", "apple_15")):
+        #     asset_path = snapshot_download(
+        #         repo_type="dataset", repo_id="Genesis-Intelligence/assets", allow_patterns=f"{asset_name}/*"
+        #     )
+        #     self.all_scene_objects.append(self.scene.add_entity(
+        #         gs.morphs.MJCF(
+        #             file=f"{asset_path}/{asset_name}/output.xml",
+        #             pos=(5.0, 0.15 * (i - 1.5), 0.7),
+        #         ),
+        #         # vis_mode="collision",
+        #         # visualize_contact=True,
+        #     )
+        #     )
+            
+        # link=self.robot.get_link("depth_camera_front_lower_camera")
+        # self.front_cams = [self.scene.add_camera(GUI=False, fov=70,env_idx=i,res=(128,128)) for i in range(num_envs)]
+        # T=np.array([[  0.00,   0.00,  -1.00,   0.00],
+        #             [ -1.00,   0.00,   0.00,   0.00],
+        #             [  0.00,   1.00,   0.00,   0.00],
+        #             [  0.00,   0.00,   0.00,   1.00]])
+        # for cam in self.front_cams:
+        #     cam.attach(link, T)
+        
+        # link=self.robot.get_link("depth_camera_rear_lower_camera")
+        # self.back_cams = [self.scene.add_camera(GUI=False, fov=70,env_idx=i,res=(128,128)) for i in range(num_envs)]
+        # T=np.array([[  0.00,   0.00,  -1.00,   0.00],
+        #             [ -1.00,   0.00,   0.00,   0.00],
+        #             [  0.00,   1.00,   0.00,   0.00],
+        #             [  0.00,   0.00,   0.00,   1.00]])
+        # for cam in self.back_cams:
+        #     cam.attach(link, T)
             
         # link=self.robot.get_link("base_link")
         # self.base_cams = [self.scene.add_camera(GUI=False, fov=70,env_idx=i,res=(512,512)) for i in range(num_envs)]
@@ -153,14 +154,14 @@ class APEnv:
         # for cam in self.base_cams:
         #     cam.attach(link, T)
 
-        link=self.robot.get_link("Link6")
-        self.gripper_cams = [self.scene.add_camera(GUI=False, fov=70,env_idx=i,res=(512,512)) for i in range(num_envs)]
-        T=np.array([[  0.00,   0.00,  -1.00,   0.00],
-                    [ -1.00,   0.00,   0.00,   0.00],
-                    [  0.00,   1.00,   0.00,   0.00],
-                    [  0.00,   0.00,   0.00,   1.00]])
-        for cam in self.gripper_cams:
-            cam.attach(link, T)
+        # link=self.robot.get_link("Link6")
+        # self.gripper_cams = [self.scene.add_camera(GUI=False, fov=70,env_idx=i,res=(512,512)) for i in range(num_envs)]
+        # T=np.array([[  0.00,   0.00,  -1.00,   0.00],
+        #             [ -1.00,   0.00,   0.00,   0.00],
+        #             [  0.00,   1.00,   0.00,   0.00],
+        #             [  0.00,   0.00,   0.00,   1.00]])
+        # for cam in self.gripper_cams:
+        #     cam.attach(link, T)
         
         # self.all_scene_objects=[]
         # self.object=[None]*self.num_envs
@@ -287,76 +288,16 @@ class APEnv:
         self.left_gripper = next((link for link in self.robot.links if link.name == "Link7"), None)
         self.right_gripper = next((link for link in self.robot.links if link.name == "Link8"), None)
         # # Assuming you have these variables:
-        # # dummy_depth = torch.randn(10, 5, 6)  # Example dummy tensor, replace with actual
-        # # dummy_image = torch.randn(10, 5, 6)  # Example dummy tensor, replace with actual
-
-        # # Now we print the shapes for each element **before** any manipulation:
-
-        # # 1. "back_depth": dummy_depth
-        # print("back_depth shape before manipulation:", dummy_depth.shape)
-
-        # # 2. "commands": self.commands[0]
-        # print("commands shape before manipulation:", self.commands.shape)
-
-        # # 3. "dof_diff": (self.dof_pos[0] - self.default_dof_pos[0]) * self.obs_scales["dof_pos"]
-        # print("dof_pos shape before manipulation:", self.dof_pos.shape)
-        # print("default_dof_pos shape before manipulation:", self.default_dof_pos.shape)
-        # print("dof_diff shape before manipulation:", (self.dof_pos[0] - self.default_dof_pos[0]).shape)
-
-        # # 4. "dof_vel": self.dof_vel[0] * self.obs_scales["dof_vel"]
-        # print("dof_vel shape before manipulation:", self.dof_vel.shape)
-
-        # # 5. "front_depth": dummy_depth
-        # print("front_depth shape before manipulation:", dummy_depth.shape)
-
-        # # 6. "gripper_depth": dummy_depth
-        # print("gripper_depth shape before manipulation:", dummy_depth.shape)
-
-        # # 7. "gripper_img": dummy_image
-        # print("gripper_img shape before manipulation:", dummy_image.shape)
-
-        # # 8. "object_pos": self.obj_pos
-        # print("object_pos shape before manipulation:", self.obj_pos.shape)
-
-        # # 9. "object_quat": self.obj_quat
-        # print("object_quat shape before manipulation:", self.obj_quat.shape)
-
-        # # 10. "robot_base_pos": self.robot.get_pos()
-        # print("robot_base_pos shape before manipulation:", self.robot.get_pos().shape)
-
-        # # 11. "robot_base_quat": self.robot.get_quat()
-        # print("robot_base_quat shape before manipulation:", self.robot.get_quat().shape)
-
-        # # 12. "taken_actions": self.actions[0]
-        # print("actions shape before manipulation:", self.actions.shape)
-        # exit(0)
     
-    def _random_pos(self,num_envs, x_range=(-10,10), y_range=(-10,10), z_range=(-10,10)):
-        x_min, x_max = x_range
-        y_min, y_max = y_range
-        z_min, z_max = z_range
-        
-        x = torch.empty((num_envs,), ).uniform_(x_min, x_max)
-        y = torch.empty((num_envs,), ).uniform_(y_min, y_max)
-        z = torch.empty((num_envs,), ).uniform_(z_min, z_max)
-        
-        return torch.stack((x, y, z), dim=1)
-
-    def _random_quat(self,num_envs):
-        """
-        Generate random unit quaternions of shape (n_envs, 4),
-        such that each quaternion has unit norm (valid rotation).
-        """
-        quat = torch.randn((num_envs, 4))       # Sample from N(0,1)
-        quat = quat / quat.norm(dim=1, keepdim=True)         # L2 normalize each row
+    def _random_quat_z(self,envs_idx):
+        num_envs=envs_idx.shape
+        theta = torch.rand(num_envs) * 2 * torch.pi  # angle in [0, 2π)
+        half_theta = theta / 2
+        quat = torch.zeros((num_envs, 4))
+        quat[:, 2] = torch.sin(half_theta)  # z
+        quat[:, 3] = torch.cos(half_theta)  # w
         return quat
-        
-    def _sample_TF_command(self,envs_idx):
-        num_envs= len(envs_idx)
-        zeros = torch.zeros(num_envs // 2, dtype=torch.int)
-        ones = torch.ones(num_envs - len(zeros), dtype=torch.int)
-        return torch.cat([zeros, ones]).to(dtype=gs.tc_float)
-    
+
     # def _sample_TF_command(self,envs_idx,cond_index=None):
     def _random_pos_near_base(self,envs_idx,scale):
         """
@@ -384,119 +325,17 @@ class APEnv:
         sampled_pos = selected_poses + offset
 
         return sampled_pos
-        
-    def _randomise_basket(self,envs_idx):
-        self.basket.set_pos(self._random_pos_near_base(envs_idx,1.0), envs_idx=envs_idx)
-
-    def _randomise_obj(self,envs_idx,pos=None, obj=None, obj_class=None):
-        # self.chosen_object=self.all_scene_objects[np.random.randint(low=0,high=len(self.all_scene_objects))]
-        self.chosen_object[envs_idx] = torch.randint(
-            0, len(self.all_scene_objects), (len(envs_idx),), dtype=gs.tc_int
-        )
-        # print("env_sjape",envs_idx.shape[0])
-        # Step 2: Sample random positions for each selected env
-        self.obj_pos[envs_idx] = self._random_pos_near_base(num_envs=envs_idx.shape[0], scale=1.0)
-        self.obj_quat[envs_idx] = self._random_quat(num_envs=envs_idx.shape[0])
-        # Step 3: Loop through each env in envs_idx and set the object pose
-        for env_id in envs_idx.tolist():  # Convert tensor to Python list of ints
-            obj_index = self.chosen_object[env_id].item()  # Get chosen object index
-            obj = self.all_scene_objects[obj_index]        # Get the actual object
-            pos = self.obj_pos[env_id]                     # Get the position for this env
-            quat = self.obj_quat[env_id]
-            
-            obj.set_pos(pos, envs_idx=env_id)
-            obj.set_quat(quat, envs_idx=env_id)    
-            
-    def _resample_commands_old(self, envs_idx):
-        self.commands[envs_idx,0]=torch.ones(len(envs_idx),device=gs.device,dtype=gs.tc_float)
-        #change to later sample from closed form solutions
-        
-        #sample pick command
-        if self.last_commands[envs_idx,0]>0.0 and self.episode_length_buf>25.0:
-            self.commands[envs_idx,0]=torch.zeros(len(envs_idx),device=gs.device,dtype=gs.tc_float)
-            self.commands[envs_idx,1]=1.0
-
-        pick_mask = self.commands[envs_idx, 1] > 0.0  # Boolean tensor, same length as envs_idx
-        envs_with_pick = envs_idx[pick_mask]
-        if len(envs_with_pick) > 0:
-            self._randomise_obj(envs_with_pick, pos=True, obj=True, obj_class=True)
-
-        #sample goto command
-        if self.last_commands[envs_idx,1]>0.0 and self.episode_sums["pick_grasp_object"][envs_idx]>0.5:
-            self.commands[envs_idx,2]=1.0
-        goto_mask=self.commands[envs_idx,2]>0.0 # and self.last_rewards[envs_idx]["pick_grasp_object"]>0.5
-        envs_with_goto = envs_idx[goto_mask]
-        #sample place command based on the last pick command
-        if len(envs_with_goto)>0:
-            self.commands[envs_idx,4:7]=gs_rand_float(self.command_cfg["goto_pos"], (len(envs_idx),), gs.device)
-            self.commands[envs_idx,7:11]=gs_rand_float(self.command_cfg["goto_quat"], (len(envs_idx),), gs.device)
-            
-                # print("last_commands",self.last_commands[envs_idx,1])
-        if self.last_commands[envs_idx,2]>0.0 and self.episode_sums["goto"][envs_idx]>0.5:
-            self.commands[envs_idx,-1]=1.0
-        self.commands[envs_idx,-1]=self._sample_TF_command(envs_idx,cond_index=None)
-        place_mask=self.last_commands[envs_idx,-1]>0.0 # and self.last_rewards[envs_idx]["pick_grasp_object"]>0.5
-        envs_with_place = envs_idx[place_mask]
-        #sample place command based on the last pick command
-        if len(envs_with_place)>0:
-            self.commands[envs_idx,2]=self._sample_TF_command(envs_idx)
-            self._randomise_goal(envs_idx)
 
     def _resample_commands(self, envs_idx):
-        self.commands[envs_idx, 0] = torch.ones(len(envs_idx), device=gs.device, dtype=gs.tc_float)
-        # TODO: Later sample from closed-form solutions
 
-        # Sample pick command
-        pick_condition = (self.last_commands[envs_idx, 0] > 0.0) & (self.episode_length_buf[envs_idx] > 25.0)
-        if pick_condition.any():
-            self.commands[envs_idx[pick_condition], 0] = 0.0
-            self.commands[envs_idx[pick_condition], 1] = 1.0
+        self.commands[envs_idx, 2] = 1.0
 
-        # Mask for pick command
-        pick_mask = self.commands[envs_idx, 1] > 0.0
-        envs_with_pick = envs_idx[pick_mask]
-        if len(envs_with_pick) > 0:
-            self._randomise_obj(envs_with_pick, pos=True, obj=True, obj_class=True)
+        # goto_mask = self.commands[envs_idx, 2] > 0.0
+        # envs_with_goto = envs_idx[goto_mask]
+        # if len(envs_with_goto) > 0:
+        self.commands[envs_idx, 4:7] = self._random_pos_near_base(self.command_cfg["goto_pos"], (len(envs_idx),), gs.device)
+        self.commands[envs_idx, 7:11] = self._random_quat_z(self.command_cfg["goto_quat"], (len(envs_idx),), gs.device)
 
-        # Sample goto command
-        goto_condition = (self.last_commands[envs_idx, 1] > 0.0) & (self.episode_sums["pick_grasp_object"][envs_idx] > 0.5)
-        if goto_condition.any():
-            self.commands[envs_idx[goto_condition], 2] = 1.0
-
-        goto_mask = self.commands[envs_idx, 2] > 0.0
-        envs_with_goto = envs_idx[goto_mask]
-        if len(envs_with_goto) > 0:
-            self.commands[envs_idx, 4:7] = gs_rand_float(self.command_cfg["goto_pos"], (len(envs_idx),), gs.device)
-            self.commands[envs_idx, 7:11] = gs_rand_float(self.command_cfg["goto_quat"], (len(envs_idx),), gs.device)
-
-        # Sample place command
-        place_condition = (self.last_commands[envs_idx, 2] > 0.0) & (self.episode_sums["goto"][envs_idx] > 0.5)
-        if place_condition.any():
-            self.commands[envs_idx[place_condition], -1] = 1.0
-
-        self.commands[envs_idx, -1] = self._sample_TF_command(envs_idx, cond_index=None)
-
-        place_mask = self.last_commands[envs_idx, -1] > 0.0
-        envs_with_place = envs_idx[place_mask]
-        if len(envs_with_place) > 0:
-            self.commands[envs_idx, 2] = self._sample_TF_command(envs_idx)
-            self._randomise_goal(envs_idx)
-            
-    def _update_obj_pos(self):
-        # all_envs=torch.tensor(0, self.num_envs,dtype=gs.tc_int)
-        all_envs=range(self.num_envs)
-        for env_id in list(all_envs):  # Convert tensor to Python list of ints
-            obj_index = self.chosen_object[env_id].item()  # Get chosen object index
-            obj = self.all_scene_objects[obj_index]        # Get the actual object
-            self.obj_pos[env_id]=obj.get_pos(envs_idx=[env_id])
-            self.obj_quat[env_id]=obj.get_quat(envs_idx=[env_id])
-            
-    def _update_basket_pos(self):
-        # all_envs=torch.tensor(0, self.num_envs,dtype=gs.tc_int)
-        # all_envs=range(self.num_envs)
-        # for env_id in list(all_envs):  # Convert tensor to Python list of ints
-        self.basket_pos=self.basket.get_pos()
-        self.basket_quat=self.basket.get_quat()  
 
     def _check_collisions(self, entity, env_indices, exclude_collision):
         """
@@ -564,8 +403,8 @@ class APEnv:
 
         
     def step(self, actions):
-        self._update_obj_pos()
-        self._update_basket_pos()
+        # self._update_obj_pos()
+        # self._update_basket_pos()
         # print(self.robot.get_dofs_kp())
         self.actions = torch.clip(actions, -self.env_cfg["clip_actions"], self.env_cfg["clip_actions"])
         exec_actions = self.last_actions if self.simulate_action_latency else self.actions
@@ -627,33 +466,6 @@ class APEnv:
         #     print(key,":!:",val.shape)
         # exit(0)
         
-        front_depth = [] 
-        for cam in self.front_cams:
-            cam.move_to_attach()
-            depth = cam.render(rgb=False,depth=True)[1]
-            front_depth.append(depth)  # just append each (100, 100, 3) array
-        front_depth_stacked = np.stack(front_depth, axis=0)
-        
-        back_depth = [] 
-        for cam in self.back_cams:
-            cam.move_to_attach()
-            depth = cam.render(rgb=False,depth=True)[1]
-            back_depth.append(depth)  # just append each (100, 100, 3) array
-        back_depth_stacked = np.stack(back_depth, axis=0)
-        
-        gripper_img=[]
-        for cam in self.gripper_cams:
-            cam.move_to_attach()
-            single_image= cam.render()[0]
-            gripper_img.append(single_image)
-        gripper_img_stacked=np.stack(gripper_img,axis=0)
-        
-        gripper_depth=[]
-        for cam in self.gripper_cams:
-            cam.move_to_attach()
-            single_depth= cam.render(rgb=False,depth=True)[1]
-            gripper_depth.append(single_depth)
-        gripper_depth_stacked=np.stack(gripper_depth,axis=0)
         # compute observations
         # print("#"*20)
         # print("obj_pos",self.obj_pos.shape)
@@ -661,15 +473,18 @@ class APEnv:
         # print("robot_pos",self.robot.get_pos().shape)
         # print("robot_quat",self.robot.get_pos().shape)
         # print("#"*20)
+        dummy_depth= torch.zeros((self.num_envs,512, 512,1))
+        dummy_depth_small= torch.zeros((self.num_envs,128, 128,1))
+        dummy_image= torch.zeros((self.num_envs,512, 512,3))
         self.obs_buf = torch.cat(
             [
-                torch.tensor(back_depth_stacked).view(self.num_envs, -1),
+                dummy_depth_small.view(self.num_envs, -1),
                 self.commands, # 3
                 (self.dof_pos - self.default_dof_pos) * self.obs_scales["dof_pos"],  # 12
                 self.dof_vel * self.obs_scales["dof_vel"],  # 12
-                torch.tensor(front_depth_stacked).view(self.num_envs, -1),
-                torch.tensor(gripper_depth_stacked).view(self.num_envs, -1),
-                torch.tensor(gripper_img_stacked).view(self.num_envs, -1),
+                dummy_depth_small.view(self.num_envs, -1),
+                dummy_depth.view(self.num_envs, -1),
+                dummy_image.view(self.num_envs, -1),
                 self.obj_pos,
                 self.obj_quat,
                 self.robot.get_pos(),
@@ -701,7 +516,8 @@ class APEnv:
         # print("actions shape:", self.actions.shape)
         # exit(0)
 
-        # print("obs_buf_shape at step",self.obs_buf.shape)
+        print("obs_buf_shape at step",self.obs_buf.shape)
+        print(self.obs_buf)
         return self.obs_buf, self.rew_buf, self.reset_buf, self.extras
 
     def get_observations(self):
@@ -1209,4 +1025,11 @@ class APEnv:
     def _reward_base_height(self):
         reward = (self.base_pos[:, 2] - self.reward_cfg["base_height_target"])*100
         # print("_reward_base_height:", reward)
+        return reward
+
+    def _reward_goal_proximity(self):
+        target_pos = self.commands[:, 0:3]
+        base_pos = self.robot.get_pos().squeeze(1)
+        dist = torch.norm(base_pos - target_pos, dim=-1)
+        reward = 1.0 / (dist + 1e-3)  # avoid divide-by-zero
         return reward
