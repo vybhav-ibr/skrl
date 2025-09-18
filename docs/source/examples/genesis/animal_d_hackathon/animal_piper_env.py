@@ -5,6 +5,7 @@ import numpy as np
 from genesis.utils.geom import quat_to_xyz, transform_by_quat, inv_quat, transform_quat_by_quat
 from collections import OrderedDict
 from huggingface_hub import snapshot_download
+import time
 # def gs_rand_float(command, shape, device):
 #     stacked_commands=None
 #     for command_element in command:
@@ -67,20 +68,6 @@ class APWEnv:
 
         # add plain
         self.ground=self.scene.add_entity(gs.morphs.URDF(file="urdf/plane/plane.urdf", fixed=True))
-        
-        # self.ball=self.scene.add_entity(
-        #     gs.morphs.Sphere(
-        #         radius=(0.02),
-        #         fixed=True,
-        #         collision=True,
-        #     ),
-        #     # material=gs.materials.Rigid(gravity_compensation=1),
-        #     surface=gs.surfaces.Rough(
-        #         diffuse_texture=gs.textures.ColorTexture(
-        #             color=(225/255, 165/225, 0.0),
-        #         ),
-        #     ),
-        # )
 
         # # add robot
         self.base_init_pos = torch.tensor(self.env_cfg["base_init_pos"], device=gs.device)
@@ -88,7 +75,7 @@ class APWEnv:
         self.inv_base_init_quat = inv_quat(self.base_init_quat)
         self.robot = self.scene.add_entity(
             gs.morphs.URDF(
-                file="/home/vybhav/gs_gym_wrapper_reference/anymal_d/urdf/anymal_d.urdf",
+                file="skrl/docs/source/examples/genesis/anymal_d/urdf/anymal_d.urdf",
                 pos=self.base_init_pos.cpu().numpy(),
                 quat=self.base_init_quat.cpu().numpy(),
                 links_to_keep=self.env_cfg["links_to_keep"]
@@ -96,94 +83,6 @@ class APWEnv:
             visualize_contact=True
         )
         
-        # self.basket=self.scene.add_entity(
-        #     gs.morphs.Mesh(
-        #         file="meshes/tank.obj",
-        #         scale=5.0,
-        #         fixed=True,
-        #         pos=(5.0,0,0),
-        #         euler=(90, 0, 90),
-        #         # euler=(80, 10, 90),
-        #     ),
-        #      surface=gs.surfaces.Rough(
-        #         diffuse_texture=gs.textures.ColorTexture(
-        #             color=(0/255, 165/225, 255/255),
-        #         ),
-        #     ),
-        #     # vis_mode="collision",
-        # )
-        # self.all_scene_objects=[]
-        # for i, asset_name in enumerate(("donut_0", "mug_1", "cup_2", "apple_15")):
-        #     asset_path = snapshot_download(
-        #         repo_type="dataset", repo_id="Genesis-Intelligence/assets", allow_patterns=f"{asset_name}/*"
-        #     )
-        #     self.all_scene_objects.append(self.scene.add_entity(
-        #         gs.morphs.MJCF(
-        #             file=f"{asset_path}/{asset_name}/output.xml",
-        #             pos=(5.0, 0.15 * (i - 1.5), 0.7),
-        #         ),
-        #         # vis_mode="collision",
-        #         # visualize_contact=True,
-        #     )
-        #     )
-            
-        # link=self.robot.get_link("depth_camera_front_lower_camera")
-        # self.front_cams = [self.scene.add_camera(GUI=False, fov=70,env_idx=i,res=(128,128)) for i in range(num_envs)]
-        # T=np.array([[  0.00,   0.00,  -1.00,   0.00],
-        #             [ -1.00,   0.00,   0.00,   0.00],
-        #             [  0.00,   1.00,   0.00,   0.00],
-        #             [  0.00,   0.00,   0.00,   1.00]])
-        # for cam in self.front_cams:
-        #     cam.attach(link, T)
-        
-        # link=self.robot.get_link("depth_camera_rear_lower_camera")
-        # self.back_cams = [self.scene.add_camera(GUI=False, fov=70,env_idx=i,res=(128,128)) for i in range(num_envs)]
-        # T=np.array([[  0.00,   0.00,  -1.00,   0.00],
-        #             [ -1.00,   0.00,   0.00,   0.00],
-        #             [  0.00,   1.00,   0.00,   0.00],
-        #             [  0.00,   0.00,   0.00,   1.00]])
-        # for cam in self.back_cams:
-        #     cam.attach(link, T)
-            
-        # link=self.robot.get_link("base_link")
-        # self.base_cams = [self.scene.add_camera(GUI=False, fov=70,env_idx=i,res=(512,512)) for i in range(num_envs)]
-        # T=np.array([[  0.00,   0.00,  -1.00,   0.00],
-        #             [ -1.00,   0.00,   0.00,   0.00],
-        #             [  0.00,   1.00,   0.00,   0.00],
-        #             [  0.00,   0.00,   0.00,   1.00]])
-        # for cam in self.base_cams:
-        #     cam.attach(link, T)
-
-        # link=self.robot.get_link("Link6")
-        # self.gripper_cams = [self.scene.add_camera(GUI=False, fov=70,env_idx=i,res=(512,512)) for i in range(num_envs)]
-        # T=np.array([[  0.00,   0.00,  -1.00,   0.00],
-        #             [ -1.00,   0.00,   0.00,   0.00],
-        #             [  0.00,   1.00,   0.00,   0.00],
-        #             [  0.00,   0.00,   0.00,   1.00]])
-        # for cam in self.gripper_cams:
-        #     cam.attach(link, T)
-        
-        # self.all_scene_objects=[]
-        # self.object=[None]*self.num_envs
-        # self.num_objects=5
-        # for obj_it in range(1,self.num_objects+1):
-        #     self.all_scene_objects.append(
-        #         self.scene.add_entity(
-        #             gs.morphs.Sphere(
-        #                 radius=(0.02*obj_it/2),
-        #                 fixed=True,
-        #                 pos=(obj_it+1,0,0.25),
-        #                 collision=True,
-        #             ),
-        #             # material=gs.materials.Rigid(gravity_compensation=1),
-        #             surface=gs.surfaces.Rough(
-        #                 diffuse_texture=gs.textures.ColorTexture(
-        #                     color=(225/255, 165/225, 0.0),
-        #                 ),
-        #             ),
-        #         )
-        #     )
-            
         # build
         self.scene.build(n_envs=num_envs,env_spacing=(2,2), n_envs_per_row=num_envs)
 
@@ -207,8 +106,15 @@ class APWEnv:
             self.reward_scales[name] *= self.dt
             self.reward_functions[name] = getattr(self, "_reward_" + name)
             self.episode_sums[name] = torch.zeros((self.num_envs,), device=gs.device, dtype=gs.tc_float)
-            
-            
+        
+        self.default_dof_pos = torch.tensor(
+            [self.env_cfg["default_dof_properties"][name][0] for name in self.dof_names],
+            device=gs.device,
+            dtype=gs.tc_float,
+        )
+        
+        self.robot.set_dofs_position(self.default_dof_pos.repeat(self.num_envs,1),self.motors_dof_idx)
+        
         self.obj_pos = torch.zeros((self.num_envs, 3), device=gs.device, dtype=gs.tc_float)
         self.obj_quat = torch.zeros((self.num_envs, 4), device=gs.device, dtype=gs.tc_float)
         
@@ -240,12 +146,6 @@ class APWEnv:
         self.last_commands = torch.zeros_like(self.commands)
         self.base_pos = torch.zeros((self.num_envs, 3), device=gs.device, dtype=gs.tc_float)
         self.base_quat = torch.zeros((self.num_envs, 4), device=gs.device, dtype=gs.tc_float)
-        
-        self.default_dof_pos = torch.tensor(
-            [self.env_cfg["default_dof_properties"][name][0] for name in self.dof_names],
-            device=gs.device,
-            dtype=gs.tc_float,
-        )
         
         self.arm_pick_pos=torch.tensor(
             [self.env_cfg["arm_pick_pos"][name][0] for name in self.arm_names],
@@ -290,7 +190,7 @@ class APWEnv:
         # # Assuming you have these variables:
     
     def _random_quat_z(self,envs_idx):
-        num_envs=envs_idx.shape
+        num_envs=envs_idx.shape[0]
         theta = torch.rand(num_envs) * 2 * torch.pi  # angle in [0, 2π)
         half_theta = theta / 2
         quat = torch.zeros((num_envs, 4))
@@ -333,8 +233,8 @@ class APWEnv:
         # goto_mask = self.commands[envs_idx, 2] > 0.0
         # envs_with_goto = envs_idx[goto_mask]
         # if len(envs_with_goto) > 0:
-        self.commands[envs_idx, 4:7] = self._random_pos_near_base(self.command_cfg["goto_pos"], (len(envs_idx),), gs.device)
-        self.commands[envs_idx, 7:11] = self._random_quat_z(self.command_cfg["goto_quat"], (len(envs_idx),), gs.device)
+        self.commands[envs_idx, 4:7] = self._random_pos_near_base(envs_idx=envs_idx,scale=1.0)
+        self.commands[envs_idx, 7:11] = self._random_quat_z(envs_idx=envs_idx)
 
 
     def _check_collisions(self, entity, env_indices, exclude_collision):
@@ -403,13 +303,14 @@ class APWEnv:
 
         
     def step(self, actions):
+        # time.sleep(5)
         # self._update_obj_pos()
         # self._update_basket_pos()
         # print(self.robot.get_dofs_kp())
         self.actions = torch.clip(actions, -self.env_cfg["clip_actions"], self.env_cfg["clip_actions"])
         exec_actions = self.last_actions if self.simulate_action_latency else self.actions
         target_dof_pos = exec_actions * self.env_cfg["action_scale"] + self.default_dof_pos
-        self.robot.set_dofs_position(target_dof_pos, self.motors_dof_idx)
+        self.robot.control_dofs_position(target_dof_pos, self.motors_dof_idx)
         self.scene.step()
 
         # update buffers
@@ -447,12 +348,12 @@ class APWEnv:
         time_out_idx = (self.episode_length_buf > self.max_episode_length).nonzero(as_tuple=False).reshape((-1,))
         self.extras["time_outs"] = torch.zeros_like(self.reset_buf, device=gs.device, dtype=gs.tc_float)
         self.extras["time_outs"][time_out_idx] = 1.0
-
+        print("resetting these",self.reset_buf)
         self.reset_idx(self.reset_buf.nonzero(as_tuple=False).reshape((-1,)))
 
         # compute reward
         self.rew_buf[:] = 0.0
-        self.individual_reward_dict = {}
+        # self.individual_reward_dict = {}
         # print(self.reward_functions.items())
         for name, reward_func in self.reward_functions.items():
             # print(name,":",self.reward_scales[name],"",reward_func())
@@ -516,8 +417,8 @@ class APWEnv:
         # print("actions shape:", self.actions.shape)
         # exit(0)
 
-        print("obs_buf_shape at step",self.obs_buf.shape)
-        print(self.obs_buf)
+        # print("obs_buf_shape at step",self.obs_buf.shape)
+        # print(self.obs_buf)
         return self.obs_buf, self.rew_buf, self.reset_buf, self.extras
 
     def get_observations(self):
@@ -579,188 +480,13 @@ class APWEnv:
             )
             self.episode_sums[key][envs_idx] = 0.0
 
-        # self._resample_commands(envs_idx)
+        self._resample_commands(envs_idx)
 
     def reset(self):
         self.reset_buf[:] = True
         self.reset_idx(torch.arange(self.num_envs, device=gs.device))
         # print("obs_buf_shape",self.obs_buf.shape)
         return self.obs_buf, None
-
-    def waste():
-        pass
-        # ------------ reward functions----------------
-        
-        # def _reward_survival(self):
-        #     return self.episode_length_buf/self.max_episode_length
-            
-        # def _reward_pos_alignment(self):
-        #     eef_pos = self.robot.get_pos(self.eef_link_idx)
-        #     eef_quat = self.robot.get_pos(self.eef_link_idx)
-
-        #     target_pos = self.goal_pose[:, :3]
-        #     target_quat = self.goal_pose[:, 3:7]
-
-        #     # Position error (L2 norm)
-        #     pos_error = torch.norm(eef_pos - target_pos, dim=-1)
-
-        #     # Orientation error: compute angular distance from quaternions
-        #     dot_product = torch.sum(eef_quat * target_quat, dim=-1).clamp(-1.0, 1.0)
-        #     ang_error = 2 * torch.acos(torch.abs(dot_product))
-
-        #     # Combine errors
-        #     reward = torch.exp(-2.0 * pos_error) * torch.exp(-1.0 * ang_error)
-        #     return reward
-
-        # def _reward_undesirable_contact(self):
-        #     # Get current gripper DOF positions
-        #     ground_contacts=self.robot.get_contacts(with_entity=self.ground)
-        #     ground_contact_forces=[]
-        #     table_contact_forces=[]
-        #     print("ground_contact:",ground_contacts["link_a"])
-        #     forces=torch.zeros((self.num_envs,1))
-        #     if ground_contacts["link_a"].sum()>0:
-        #         for it,contact_link_a_idx in enumerate(ground_contacts["link_a"]):
-        #             if self.scene.rigid_solver.links[contact_link_a_idx].name in self.arm_links:
-        #                 ground_contact_forces.append(sum(ground_contacts["force_a"][it]))
-                        
-        #         # ground_contacts=ground_contacts["link_a" in self.arm_links]
-        #         if self.table is not None:
-        #             table_contacts=self.robot.get_contacts(with_entity=self.ground)
-                    
-        #             for it,contact_link_a_idx in enumerate(table_contacts["link_a"]):
-        #                 if self.scene.rigid_solver.links[contact_link_a_idx].name in self.arm_links:
-        #                     table_contact_forces.append(sum(table_contacts["force_a"][it]))
-        #         ground_contact_forces.extend(table_contact_forces)
-        #         forces=torch.tensor(ground_contact_forces)
-        #     print("forces shape is",forces.shape)
-        #     return forces
-
-        # def _reward_target_force_and_contact(self):
-        #     ball_contacts=self.robot.get_contacts(with_entity=self.ball)
-        #     # ball_contact_forces=[]
-        #     contact_link_a_idx=ball_contacts["link_a"][0]
-        #     if self.scene.rigid_solver.links[contact_link_a_idx].name in self.dummy_eef_link:
-        #         contacts_sum=(sum(ball_contacts["force_a"][0]))
-        #     forces=torch.tensor(contacts_sum)
-        #     return forces
-
-        # def _reward_high_joint_force(self):
-        #     # Penalize high joint torques (forces)
-        #     joint_torques = self.robot.get_dofs_force(self.motors_dof_idx)
-        #     return torch.sum(torch.square(joint_torques), dim=1)
-        
-        # def _reward_time_cost(self):
-        #     pos_alignment=self._reward_pos_alignment()
-        #     time_scaled_reward=pos_alignment*self.episode_length_buf
-        #     return time_scaled_reward
-        # # def _reward_tracking_lin_vel(self):
-        # #     # Tracking of linear velocity commands (xy axes)
-        # #     lin_vel_error = torch.sum(torch.square(self.commands[:, :2] - self.base_lin_vel[:, :2]), dim=1)
-        # #     return torch.exp(-lin_vel_error / self.reward_cfg["tracking_sigma"])
-
-        # # def _reward_tracking_ang_vel(self):
-        # #     # Tracking of angular velocity commands (yaw)
-        # #     ang_vel_error = torch.square(self.commands[:, 2] - self.base_ang_vel[:, 2])
-        # #     return torch.exp(-ang_vel_error / self.reward_cfg["tracking_sigma"])
-
-        # # def _reward_lin_vel_z(self):
-        # #     # Penalize z axis base linear velocity
-        # #     return torch.square(self.base_lin_vel[:, 2])
-
-        # def _reward_action_rate(self):
-        #     # Penalize changes in actions
-        #     return torch.sum(torch.square(self.last_actions - self.actions), dim=1)
-
-        # # def _reward_similar_to_default(self):
-        # #     # Penalize joint poses far away from default pose
-        # #     return torch.sum(torch.abs(self.dof_pos - self.default_dof_pos), dim=1)
-
-        # def _reward_base_height(self):
-        #     # Penalize base height away from target
-        #     return torch.square(self.base_pos[:, 2] - self.reward_cfg["base_height_target"])
-
-    def _get_contact_reward_old(self, entities, entity_indices, desired_names, undesired_names):
-        """
-        Compute contact cost per environment based on contact forces with desired and undesired entities,
-        using a per-environment selection of the source entity.
-
-        Args:
-            entities: List of entities to select from.
-            entity_indices: Tensor[int] of shape (n_envs,), indexing into `entities` per env.
-            desired_names: List[str] of desired contact entity names.
-            undesired_names: List[str] of undesired contact entity names.
-
-        Returns:
-            Tensor of shape (n_envs,) with contact reward per environment.
-        """
-        n_envs = self.num_envs
-        scene = self.scene
-
-        # Initialize per-env cost array
-        cost_per_env = np.zeros(n_envs)
-
-        # Select the appropriate entity for each environment
-        # selected_entities[i] is the entity for env i
-        # print("entity_ind",entity_indices)
-        selected_entities = [entities[i] for i in entity_indices.tolist()]
-
-        def get_force_magnitudes(contact_info):
-            """
-            Compute contact force magnitudes (||force_a||) per contact.
-            Returns shape: (n_envs, n_contacts) or (1, n_contacts) if not parallelized.
-            """
-            forces = contact_info.get("force_a", None)
-            if forces is None:
-                return None
-
-            if 'valid_mask' in contact_info:
-                # Multiply by valid_mask to zero out invalid contacts
-                mask = contact_info['valid_mask']  # shape: (n_envs, n_contacts)
-                return np.linalg.norm(forces * mask[..., None], axis=-1)  # (n_envs, n_contacts)
-            else:
-                # Non-parallelized version: single env
-                return np.linalg.norm(forces, axis=-1)[None]  # (1, n_contacts)
-
-        def accumulate(entities, sign):
-            """
-            For each environment and each named target entity:
-            - Get contacts between the selected entity and the target
-            - Compute force magnitudes
-            - Accumulate into cost_per_env with the given sign (+1 or -1)
-            """
-            nonlocal cost_per_env
-            # print("entity_names",len(entity_names),type(entity_names),entity_names[0])
-            for target_entity in entities:
-                # target = scene.get_entity(name)
-
-                # Per-env contact force magnitude sums
-                env_force_sums = np.zeros(n_envs)
-
-                for env_idx in range(n_envs):
-                    selected_entity = selected_entities[env_idx]
-
-                    # Get contact info between selected entity and the target
-                    contact_info = selected_entity.get_contacts(with_entity=target_entity)
-
-                    # Get per-contact force magnitudes
-                    force_mags = get_force_magnitudes(contact_info)
-
-                    if force_mags is not None:
-                        # force_mags: shape (1, n_contacts) or (n_envs, n_contacts)
-                        # For single env, extract the row (first index)
-                        env_force_sums[env_idx] += np.sum(force_mags[0])
-
-                # Accumulate signed contact force magnitudes into cost
-                cost_per_env += sign * env_force_sums
-
-        # Accumulate positive cost for desired contacts
-        accumulate(desired_names, +1)
-
-        # Accumulate negative cost for undesired contacts
-        accumulate(undesired_names, -1)
-
-        return torch.tensor(cost_per_env, dtype=torch.float32)
 
     def _get_contact_reward(self, entities, entity_indices, desired_names, undesired_names):
         """
@@ -845,7 +571,7 @@ class APWEnv:
         return cost_per_env
 
     def _reward_survival(self):
-        reward = self.episode_length_buf / self.max_episode_length
+        reward = self.episode_length_buf / self.max_episode_length 
         # print("_reward_survival:", reward.shape)
         return reward
         
@@ -1011,21 +737,15 @@ class APWEnv:
         # print("_reward_high_joint_force:", reward.shape)
         return reward
 
-    # def _reward_time_cost(self):
-    #     pos_alignment = self._reward_pos_alignment()
-    #     time_scaled_reward = pos_alignment * self.episode_length_buf
-    #     # print("_reward_time_cost:", time_scaled_reward.shape)
-    #     return time_scaled_reward
-
     def _reward_action_rate(self):
         reward = torch.sum(torch.square(self.last_actions - self.actions), dim=1)
         # print("_reward_action_rate:", reward.shape)
         return reward
 
     def _reward_base_height(self):
-        reward = (self.base_pos[:, 2] - self.reward_cfg["base_height_target"])*100
+        reward = (self.base_pos[:, 2] - self.reward_cfg["base_height_target"])
         # print("_reward_base_height:", reward)
-        return reward
+        return torch.abs(reward)
 
     def _reward_goal_proximity(self):
         target_pos = self.commands[:, 0:3]

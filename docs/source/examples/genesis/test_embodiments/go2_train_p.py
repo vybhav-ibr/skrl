@@ -100,7 +100,7 @@ def get_cfgs():
 parser = argparse.ArgumentParser()
 parser.add_argument("-e", "--exp_name", type=str, default="go2-walking")
 parser.add_argument("-v", "--vis", action="store_true", default=False)
-parser.add_argument("-B", "--num_envs", type=int, default=1024)
+parser.add_argument("-B", "--num_envs", type=int, default=64)
 parser.add_argument("--max_timesteps", type=int, default=50000)
 parser.add_argument("--memory_size", type=int, default=2500)
 args = parser.parse_args()

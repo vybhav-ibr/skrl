@@ -299,6 +299,8 @@ class PPO(Agent):
                 rewards += self._discount_factor * values * truncated
 
             # storage transition in memory
+            states_shape_add=states.shape
+            rewards_shape=rewards.shape
             self.memory.add_samples(
                 states=states,
                 actions=actions,
@@ -429,7 +431,7 @@ class PPO(Agent):
 
         # sample mini-batches from memory
         sampled_batches = self.memory.sample_all(names=self._tensors_names, mini_batches=self._mini_batches)
-
+        # print("sampled_batched_shape",len(sampled_batches))
         cumulative_policy_loss = 0
         cumulative_entropy_loss = 0
         cumulative_value_loss = 0
@@ -451,7 +453,6 @@ class PPO(Agent):
                 with torch.autocast(device_type=self._device_type, enabled=self._mixed_precision):
 
                     sampled_states = self._state_preprocessor(sampled_states, train=not epoch)
-
                     _, next_log_prob, _ = self.policy.act(
                         {"states": sampled_states, "taken_actions": sampled_actions}, role="policy"
                     )

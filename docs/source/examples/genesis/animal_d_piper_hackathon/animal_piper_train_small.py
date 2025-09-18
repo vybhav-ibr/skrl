@@ -11,19 +11,20 @@ from skrl.resources.preprocessors.torch import RunningStandardScaler
 from skrl.resources.schedulers.torch import KLAdaptiveRL
 from skrl.trainers.torch import SequentialTrainer
 from skrl.utils import set_seed
-import gymnasium
 
 import torch.nn.functional as F
 import torchvision.transforms.functional as TF
 from scipy import signal
 import genesis as gs
-from animal_piper_env import APWEnv
+from animal_piper_env import APEnv
 import numpy as np
 from ultralytics import YOLO
 from torchvision.transforms import Normalize
 
+import gymnasium
 from skrl.utils.spaces.torch import compute_space_size
 from typing import List, Optional, Tuple, Union
+
 
 def get_cfgs():
     env_cfg = {
@@ -37,13 +38,13 @@ def get_cfgs():
 
             "LF_HFE": [0.8, 100, 5.0],
             "RF_HFE": [0.8, 100, 5.0],
-            "LH_HFE": [-0.8, 100, 5.0],
-            "RH_HFE": [-0.8, 100, 5.0],
+            "LH_HFE": [1.0, 100, 5.0],
+            "RH_HFE": [1.0, 100, 5.0],
 
             "LF_KFE": [-1.5, 100, 5.0],
             "RF_KFE": [-1.5, 100, 5.0],
-            "LH_KFE": [1.5, 100, 5.0],
-            "RH_KFE": [1.5, 100, 5.0],
+            "LH_KFE": [-1.5, 100, 5.0],
+            "RH_KFE": [-1.5, 100, 5.0],
 
             "joint1": [0.0,80,5.0],
             "joint2": [0.0,80,5.0],
@@ -68,8 +69,8 @@ def get_cfgs():
         "links_to_keep":["LF_FOOT","RF_FOOT","LH_FOOT","RH_FOOT",
                          "depth_camera_front_lower_camera","depth_camera_rear_lower_camera"],
         # termination
-        "termination_criteria_roll": 25,  # degree
-        "termination_criteria_pitch": 25,
+        "termination_criteria_roll": 10,  # degree
+        "termination_criteria_pitch": 10,
         "termination_criteria_base_height": 0.35,
         "contact_exclusion_pairs":
             [["LH_FOOT","plane"],
@@ -77,9 +78,9 @@ def get_cfgs():
              ["LF_FOOT","plane"],
              ["RH_FOOT","plane"]],
         # base pose
-        "base_init_pos": [0.0, 0.0, 0.55],
+        "base_init_pos": [0.0, 0.0, 0.52],
         "base_init_quat": [1.0, 0.0, 0.0, 0.0],
-        "episode_length_s": 75.0,
+        "episode_length_s": 20.0,
         "resampling_time_s": 4.0,
         "action_scale": 0.25,
         "simulate_action_latency": True,
@@ -100,20 +101,19 @@ def get_cfgs():
         },
     }
     reward_cfg = {
-        "base_height_target": 0.55,
-        "eef_pos_object_threshold":0.25,
+        "base_height_target": 0.50,
+        "eef_pos_object_threshold":0.5,
         "reward_scales": {
-            "survival":0.5,
-            # "home":10.0,
-            # "pick_eef_pos_object":1.0,
-            # "pick_grasp_object":1.0,
-            # "place_ungrasp_object":1.0,
-            # "place_object_pos_basket":1.0,
-            "goto":10.0,
+            "survival":100.0,
+            "home":10.0,
+            "pick_eef_pos_object":1.0,
+            "pick_grasp_object":1.0,
+            "place_ungrasp_object":1.0,
+            "place_object_pos_basket":1.0,
+            "goto":50,
             "high_joint_force":-0.005,
-            "action_rate":-0.01,
-            "base_height":-10.0,
-            "goal_proximity":1.0
+            "action_rate":-0.1,
+            "base_height":-100.0,
         }
     }
     command_cfg = {
@@ -134,16 +134,16 @@ def get_cfgs():
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument("-e", "--exp_name", type=str, default="animal-piper-small-goto")
-parser.add_argument("-B", "--num_envs", type=int, default=25)
+parser.add_argument("-e", "--exp_name", type=str, default="animal-piper-small")
+parser.add_argument("-B", "--num_envs", type=int, default=5)
 parser.add_argument("--vis",action="store_true")
-parser.add_argument("--max_iterations", type=int, default=50000)
+parser.add_argument("--max_iterations", type=int, default=101)
 args = parser.parse_args()
 
-gs.init(logging_level="debug",precision="32")
+gs.init(logging_level="warning",precision="32")
 env_cfg, obs_cfg, reward_cfg, command_cfg = get_cfgs()
 
-env = APWEnv(
+env = APEnv(
     num_envs=args.num_envs, env_cfg=env_cfg, obs_cfg=obs_cfg, reward_cfg=reward_cfg, command_cfg=command_cfg, show_viewer=args.vis
 )
 # env.step()
@@ -152,33 +152,295 @@ device=gs.device
 set_seed()  # e.g. `set_seed(42)` for fixed seed
 # print("single obs shape is:",env._env.obs_buf.shape)
 
-# define shared model (stochastic and deterministic models) using mixins
+import torch.nn as nn
+from ultralytics import YOLO
+torch.autograd.set_detect_anomaly(True)
+class FrozenYOLO(nn.Module):
+    """Safe wrapper around Ultralytics YOLO for inference-only use (prevents training behavior)."""
+
+    def __init__(self, model_path):
+        super().__init__()
+        self.model = YOLO(model_path)
+        self.model.fuse()
+        self.model.eval()  # Ensure eval mode
+
+        for param in self.model.parameters():
+            param.requires_grad = False
+
+    def forward(self, *args, **kwargs):
+        # Allow usage with torch.no_grad by default
+        with torch.no_grad():
+            return self.model(*args, **kwargs)
+
+    def predict(self, *args, **kwargs):
+        with torch.no_grad():
+            return self.model.predict(*args, **kwargs)
+
+    def train(self, mode=True):
+        # Prevent .train() from triggering Ultralytics training logic
+        return self
+
+    def eval(self):
+        return self
+
+    def to(self, *args, **kwargs):
+        self.model.to(*args, **kwargs)
+        return self
+
+class YOLOForegroundExtractor(nn.Module):
+    """YOLOv8-based batched foreground extractor using instance segmentation"""
+
+    def __init__(self, model_path="yolo11s-seg.pt"):
+        super().__init__()
+
+        self.model = FrozenYOLO(model_path)  # ← use the wrapper here
+        self.model.eval()
+
+        self.imagenet_mean = (0.485, 0.456, 0.406)
+        self.imagenet_std = (0.229, 0.224, 0.225)
+        self.normalizer = Normalize(mean=self.imagenet_mean, std=self.imagenet_std)
+
+    def forward(self, rgb_images):
+        B, _, H, W = rgb_images.shape
+        device = rgb_images.device
+        # print("rgb_images shape in fg extractor:",rgb_images.shape)
+        # if rgb_images.max() > 1.5:
+        #     rgb_images = rgb_images / 255.0
+        rgb_images = self.normalizer(rgb_images)
+
+        foreground_masks = []
+
+        for i in range(B):
+            img_np = rgb_images[i].cpu().permute(1, 2, 0).numpy()  # [H, W, 3]
+            result = self.model.predict(source=img_np, imgsz=max(H, W), verbose=False)[0]
+
+            if result.masks is not None:
+                mask_tensor = result.masks.data  # [N_instances, h, w]
+                combined_mask = mask_tensor.any(dim=0).float()
+            else:
+                combined_mask = torch.zeros((result.orig_shape[0], result.orig_shape[1]), dtype=torch.float32)
+
+            # Resize back to original image shape if necessary
+            if combined_mask.shape != (H, W):
+                combined_mask = TF.resize(combined_mask.unsqueeze(0), size=[H, W], antialias=True)[0]
+
+            foreground_masks.append(combined_mask)
+
+        return torch.stack(foreground_masks, dim=0).to(device)
+    
+class MaskedDepthFeatureExtractor(nn.Module):
+    """Depth feature extractor that operates on foreground-masked depth images"""
+    
+    def __init__(self, output_dim=64, dropout_rate=0.2, mask_threshold=0.5):
+        super().__init__()
+        
+        self.mask_threshold = mask_threshold
+        
+        # Depth processing backbone
+        self.depth_backbone = nn.Sequential(
+            # First block - larger receptive field for depth understanding
+            nn.Conv2d(1, 32, kernel_size=7, stride=2, padding=3),
+            nn.BatchNorm2d(32),
+            nn.ReLU(),
+            nn.Dropout2d(dropout_rate * 0.5),  # Lower dropout in early layers
+            
+            # Second block
+            nn.Conv2d(32, 64, kernel_size=5, stride=2, padding=2),
+            nn.BatchNorm2d(64),
+            nn.ReLU(),
+            nn.Dropout2d(dropout_rate),
+            
+            # Third block
+            nn.Conv2d(64, 128, kernel_size=3, stride=2, padding=1),
+            nn.BatchNorm2d(128),
+            nn.ReLU(),
+            nn.Dropout2d(dropout_rate),
+            
+            # Fourth block - focus on high-level features
+            nn.Conv2d(128, 256, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(256),
+            nn.ReLU(),
+            
+            # Adaptive pooling for consistent size regardless of input resolution
+            nn.AdaptiveAvgPool2d((4, 4))
+        )
+        
+        # Feature compression and processing
+        self.feature_head = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(256 * 4 * 4, 512),
+            nn.BatchNorm1d(512),
+            nn.ReLU(),
+            nn.Dropout(dropout_rate),
+            
+            nn.Linear(512, 256),
+            nn.BatchNorm1d(256),
+            nn.ReLU(),
+            nn.Dropout(dropout_rate * 0.5),
+            
+            nn.Linear(256, output_dim),
+            nn.ReLU()
+        )
+        
+    def apply_foreground_mask(self, depth_images, foreground_masks):
+        """
+        Apply foreground mask to depth images, setting background to zero
+        
+        Args:
+            depth_images: [B, 1, H, W] depth images
+            foreground_masks: [B, H, W] foreground probability masks
+        Returns:
+            masked_depth: [B, 1, H, W] foreground-masked depth images
+        """
+        # Threshold the probability masks to get binary masks
+        binary_masks = (foreground_masks > self.mask_threshold).float()
+        
+        # Expand mask to match depth image dimensions
+        binary_masks = binary_masks.unsqueeze(1)  # [B, 1, H, W]
+        
+        # Apply mask (background becomes 0, foreground preserves depth values)
+        masked_depth = depth_images * binary_masks
+        
+        return masked_depth
+        
+    def forward(self, depth_images, foreground_masks):
+        """
+        Args:
+            depth_images: [B, 1, H, W] depth images
+            foreground_masks: [B, H, W] foreground probability masks
+        Returns:
+            features: [B, output_dim] masked depth features
+        """
+        # Apply foreground masking
+        masked_depth = self.apply_foreground_mask(depth_images, foreground_masks)
+        
+        # Extract features from masked depth
+        # print("depth_images_shape",depth_images.shape)
+        # print("fg_mask_shape",foreground_masks.shape)
+        # print("masked_depth_shape",masked_depth.shape)
+        depth_features = self.depth_backbone(masked_depth)
+        # print("depth_features_shape",depth_features.shape)
+        features = self.feature_head(depth_features)
+        
+        return features
+
+class DepthSequenceEncoder(nn.Module):
+    def __init__(self, img_size=(64, 64), embedding_dim=128, rnn_hidden_dim=256):
+        super().__init__()
+        self.embedding_dim = embedding_dim
+        self.rnn_hidden_dim = rnn_hidden_dim
+
+        # CNN encoder for a single depth image
+        self.depth_cnn = nn.Sequential(
+            nn.Conv2d(1, 16, kernel_size=3, stride=2, padding=1),  # -> [B, 16, 32, 32]
+            nn.ReLU(),
+            nn.Conv2d(16, 32, kernel_size=3, stride=2, padding=1),  # -> [B, 32, 16, 16]
+            nn.ReLU(),
+            nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1),  # -> [B, 64, 8, 8]
+            nn.ReLU(),
+            nn.Flatten(),                                           # -> [B, 64*8*8]
+            nn.Linear(64 * 8 * 8, embedding_dim),
+            nn.ReLU()
+        )
+
+        # GRU to process sequence of fused embeddings
+        self.gru = nn.GRU(input_size=embedding_dim * 2,
+                          hidden_size=rnn_hidden_dim,
+                          batch_first=True)
+
+        # Internal hidden state (not registered as parameter)
+        self.hidden_state = None
+
+    def reset(self, batch_size=1, device=None):
+        """
+        Reset the GRU hidden state. Call at the start of an episode or sequence.
+        """
+        self.hidden_state = None  # Let GRU handle initialization automatically
+
+    def step(self, front_depth: torch.Tensor, back_depth: torch.Tensor) -> torch.Tensor:
+        """
+        Process one timestep and return the current temporal embedding.
+        
+        Args:
+            front_depth: [B, 64, 64] front depth image
+            back_depth: [B, 64, 64] back depth image
+        
+        Returns:
+            current_embedding: [B, rnn_hidden_dim] embedding for this timestep
+        """
+        B = front_depth.size(0)
+
+        # # Add channel dim: [B, 1, 64, 64]
+        # front = front_depth.unsqueeze(1)
+        # back = back_depth.unsqueeze(1)
+
+        # Encode images
+        front_feat = self.depth_cnn(front_depth)  # [B, embedding_dim]
+        back_feat = self.depth_cnn(back_depth)    # [B, embedding_dim]
+
+        # Fuse views: [B, embedding_dim * 2]
+        fused = torch.cat([front_feat, back_feat], dim=-1).unsqueeze(1)  # [B, 1, fused_dim]
+        if self.hidden_state is not None:
+            self.hidden_state = self.hidden_state.detach()
+        output, self.hidden_state = self.gru(fused, self.hidden_state)  # output: [B, 1, rnn_hidden_dim]
+        return output.squeeze(1)  # [B, rnn_hidden_dim]
+    
+GLOBAL_YOLO = YOLOForegroundExtractor(model_path="yolo11n-seg.pt")
 class Shared(GaussianMixin, DeterministicMixin, Model):
-    def __init__(self, observation_space, action_space, device, clip_actions=False,
-                 clip_log_std=True, min_log_std=-20, max_log_std=2, reduction="sum"):
+    """Enhanced actor with RGB-guided depth processing"""
+    
+    def __init__(self, observation_space, action_space, device, dropout_rate=0.2,
+                 clip_actions=False, clip_log_std=True, min_log_std=-20, max_log_std=2):
+        
         Model.__init__(self, observation_space, action_space, device)
-        GaussianMixin.__init__(self, clip_actions, clip_log_std, min_log_std, max_log_std, reduction)
+        GaussianMixin.__init__(self, clip_actions, clip_log_std, min_log_std, max_log_std)
         DeterministicMixin.__init__(self, clip_actions)
-
-        self.net = nn.Sequential(nn.Linear(85, 128),
-                                 nn.ELU(),
-                                 nn.Linear(128, 128),
-                                 nn.ELU(),
-                                 nn.Linear(128, 128),
-                                 nn.ELU())
-
-        self.mean_layer = nn.Linear(128, self.num_actions)
+        # self.fg_extractor = YOLOForegroundExtractor(model_path="yolo11n-seg.pt")
+        
+        # Masked depth feature extractor (trainable)
+        self.depth_mask_extractor = MaskedDepthFeatureExtractor(
+            output_dim=64, 
+            dropout_rate=dropout_rate
+        )
+        self.depth_encoder=DepthSequenceEncoder()
+        
+        # Calculate other state dimensions
+        # ang_vel(3) + commands(3) + dof_vel(12) + dof_diff(12) + proj_gravity(3) = 33
+        other_state_dim = 85
+        total_input_dim = 64 + other_state_dim  +256# depth features + other states
+        # total_input_dim=169
+        # Action prediction network
+        
+        self.action_net = nn.Sequential(
+            nn.Linear(total_input_dim, 256),
+            nn.LayerNorm(256),
+            nn.ReLU(),
+            nn.Dropout(dropout_rate),
+            
+            nn.Linear(256, 128),
+            nn.LayerNorm(128), 
+            nn.ReLU(),
+            nn.Dropout(dropout_rate),
+            
+            nn.Linear(128, 64),
+            nn.LayerNorm(64),
+            nn.ReLU(),
+            
+            # nn.Linear(64, self.num_actions),
+            # nn.Tanh()
+        )
+        self.mean_layer= nn.Linear(64, self.num_actions)
         self.log_std_parameter = nn.Parameter(torch.zeros(self.num_actions))
-
-        self.value_layer = nn.Linear(128, 1)
-
-    def act(self, inputs, role):
+        self.value_layer = nn.Linear(64, 1)
+    
+    def act(self,inputs,role):
         if role == "policy":
             return GaussianMixin.act(self, inputs, role)
         elif role == "value":
             return DeterministicMixin.act(self, inputs, role)
-
+        
     def compute(self, inputs, role):
+        # global GLOBAL_YOLO
         states = inputs["states"]
         space = self.tensor_to_space(states, self.observation_space)
         
@@ -186,6 +448,21 @@ class Shared(GaussianMixin, DeterministicMixin, Model):
         shapes_dict={}
         for key,value in space.items():
             shapes_dict[key]=value.shape
+        # print("%"*10,"\n",shapes_dict,"\n","%"*10)
+        rgb_images = space['gripper_img'].permute(0, 3, 1, 2).float()  # [B, 3, H, W]
+        # rgb_shape=rgb_images.shape
+        # Get depth images - check if available in observation space
+        depth_images = space['gripper_depth'].permute(0, 3, 1, 2).float()  # [B, 1, H, W]
+
+        # Extract foreground segmentation masks
+        # foreground_masks = rgb_images[:][:][:][0]  # [B, H, W]
+        foreground_masks = GLOBAL_YOLO(rgb_images)  # [B, H, W]        
+        # Extract features from foreground-masked depth
+        arm_depth_features = self.depth_mask_extractor(depth_images, foreground_masks)  # [B, 64]
+        
+        # print("front_depth_shape_is",space["front_depth"].shape)
+        # exit(0)
+        depth_features=self.depth_encoder.step(space["front_depth"].permute(0, 3, 1, 2).float(),space["back_depth"].permute(0, 3, 1, 2).float())
         # Prepare other state inputs
         other_states = torch.cat([
             space["commands"].view(states.shape[0], -1), 
@@ -200,18 +477,18 @@ class Shared(GaussianMixin, DeterministicMixin, Model):
         # Assuming states.shape[0] is the batch size (n_envs or number of environments)
 
         # Combine masked depth features with other states
-        # print("other_states size",other_states.shape)
-        # combined_input = torch.cat([depth_features, other_states], dim=-1)
+        combined_input = torch.cat([arm_depth_features,depth_features, other_states], dim=-1)
         
-        if role == "policy":
-            self._shared_output = self.net(other_states)
+        if role=="policy":
+            # Predict actions
+            self._shared_output = self.action_net(combined_input)
             return self.mean_layer(self._shared_output), self.log_std_parameter, {}
-        elif role == "value":
-            shared_output = self.net(other_states) if self._shared_output is None else self._shared_output
+        elif role =="value":
+            shared_output = self.action_net(combined_input) if self._shared_output is None else self._shared_output
             self._shared_output = None
-            
-            return self.value_layer(shared_output), {}   
-
+            return self.value_layer(shared_output), {}
+# print("num_envs",env.num_envs)
+# exit(0) 
 def extract_simplified_state(flattened_obs: torch.Tensor, obs_space=env.observation_space) -> torch.Tensor:
     num_envs = flattened_obs.shape[0]
     start = 0
@@ -279,8 +556,8 @@ def expand_obs_tensor(small_obs: torch.Tensor) -> torch.Tensor:
 
     # Image/depth fields with their flattened sizes
     image_fields_sizes = {
-        "back_depth": 128 * 128 * 1,
-        "front_depth": 128 * 128 * 1,
+        "back_depth": 64 * 64 * 1,
+        "front_depth": 64 * 64 * 1,
         "gripper_depth": 512 * 512 * 1,
         "gripper_img": 512 * 512 * 3,
     }
@@ -530,7 +807,7 @@ models["value"] = models["policy"]  # same instance: shared model
 cfg = PPO_DEFAULT_CONFIG.copy()
 cfg["rollouts"] = 8  # memory_size
 cfg["learning_epochs"] = 5
-cfg["mini_batches"] = 4  # 24 * 4096 / 24576
+cfg["mini_batches"] = 8  # 24 * 4096 / 24576
 cfg["discount_factor"] = 0.99
 cfg["lambda"] = 0.95
 cfg["learning_rate"] = 1e-3
@@ -553,9 +830,8 @@ cfg["value_preprocessor"] = RunningStandardScaler
 cfg["value_preprocessor_kwargs"] = {"size": 1, "device": device}
 # logging to TensorBoard and write checkpoints (in timesteps)
 cfg["experiment"]["write_interval"] = 60
-cfg["experiment"]["checkpoint_interval"] = 100
-cfg["experiment"]["directory"] = "runs/torch/Genesis-Goto-Anymal-C-v0"
-
+cfg["experiment"]["checkpoint_interval"] = 600
+cfg["experiment"]["directory"] = "runs/torch/Isaac-Velocity-Anymal-C-v0"
 
 agent = PPO(models=models,
             memory=memory,
@@ -566,15 +842,8 @@ agent = PPO(models=models,
 
 
 # configure and instantiate the RL trainer
-cfg_trainer = {"timesteps": args.max_iterations, "headless": False}
+cfg_trainer = {"timesteps": 12000, "headless": True}
 trainer = SequentialTrainer(cfg=cfg_trainer, env=env, agents=agent)
 
-# # start training
+# start training
 trainer.train()
-
-# # download the trained agent's checkpoint from Hugging Face Hub and load it
-path = "/home/vybhav/gs_gym_wrapper_reference/skrl/runs/torch/Genesis-Goto-Anymal-C-v0/25-09-15_14-58-17-605290_PPO/checkpoints/agent_5100.pt"
-# agent.load(path)
-
-# # # # start evaluation
-# trainer.eval()
