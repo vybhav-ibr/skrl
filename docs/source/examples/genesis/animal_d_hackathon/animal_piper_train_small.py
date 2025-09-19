@@ -35,15 +35,15 @@ def get_cfgs():
             "LH_HAA": [0.0, 100, 5.0],
             "RH_HAA": [0.0, 100, 5.0],
 
-            "LF_HFE": [0.8, 100, 5.0],
-            "RF_HFE": [0.8, 100, 5.0],
-            "LH_HFE": [-0.8, 100, 5.0],
-            "RH_HFE": [-0.8, 100, 5.0],
+            "LF_HFE": [0.4, 100, 5.0],
+            "RF_HFE": [0.4, 100, 5.0],
+            "LH_HFE": [-0.4, 100, 5.0],
+            "RH_HFE": [-0.4, 100, 5.0],
 
-            "LF_KFE": [-1.5, 100, 5.0],
-            "RF_KFE": [-1.5, 100, 5.0],
-            "LH_KFE": [1.5, 100, 5.0],
-            "RH_KFE": [1.5, 100, 5.0],
+            "LF_KFE": [-0.75, 100, 5.0],
+            "RF_KFE": [-0.75, 100, 5.0],
+            "LH_KFE": [0.75, 100, 5.0],
+            "RH_KFE": [0.75, 100, 5.0],
 
             "joint1": [0.0,80,5.0],
             "joint2": [0.0,80,5.0],
@@ -71,13 +71,13 @@ def get_cfgs():
         "termination_criteria_roll": 25,  # degree
         "termination_criteria_pitch": 25,
         "termination_criteria_base_height": 0.35,
-        "contact_exclusion_pairs":
+        "contact_exclusion_pairs": #link,entity
             [["LH_FOOT","plane"],
              ["RH_FOOT","plane"],
              ["LF_FOOT","plane"],
              ["RH_FOOT","plane"]],
         # base pose
-        "base_init_pos": [0.0, 0.0, 0.55],
+        "base_init_pos": [0.0, 0.0, 0.67],
         "base_init_quat": [1.0, 0.0, 0.0, 0.0],
         "episode_length_s": 75.0,
         "resampling_time_s": 4.0,
@@ -100,10 +100,10 @@ def get_cfgs():
         },
     }
     reward_cfg = {
-        "base_height_target": 0.55,
+        "base_height_target": 0.53,
         "eef_pos_object_threshold":0.25,
         "reward_scales": {
-            "survival":0.5,
+            # "survival":0.5,
             # "home":10.0,
             # "pick_eef_pos_object":1.0,
             # "pick_grasp_object":1.0,
@@ -135,7 +135,7 @@ def get_cfgs():
 
 parser = argparse.ArgumentParser()
 parser.add_argument("-e", "--exp_name", type=str, default="animal-piper-small-goto")
-parser.add_argument("-B", "--num_envs", type=int, default=25)
+parser.add_argument("-B", "--num_envs", type=int, default=5)
 parser.add_argument("--vis",action="store_true")
 parser.add_argument("--max_iterations", type=int, default=50000)
 args = parser.parse_args()

@@ -67,7 +67,7 @@ class APWEnv:
         )
 
         # add plain
-        self.ground=self.scene.add_entity(gs.morphs.URDF(file="urdf/plane/plane.urdf", fixed=True))
+        self.plane=self.scene.add_entity(gs.morphs.URDF(file="urdf/plane/plane.urdf", fixed=True))
 
         # # add robot
         self.base_init_pos = torch.tensor(self.env_cfg["base_init_pos"], device=gs.device)
@@ -82,7 +82,19 @@ class APWEnv:
             ),
             visualize_contact=True
         )
-        
+        self.target_sphere=self.scene.add_entity(
+            gs.morphs.Sphere(
+                radius=(0.02),
+                fixed=True,
+                collision=False ,
+            ),
+            # material=gs.materials.Rigid(gravity_compensation=1),
+            surface=gs.surfaces.Rough(
+                diffuse_texture=gs.textures.ColorTexture(
+                    color=(225/255, 165/225, 0.0),
+                ),
+            ),
+        )
         # build
         self.scene.build(n_envs=num_envs,env_spacing=(2,2), n_envs_per_row=num_envs)
 
@@ -188,6 +200,10 @@ class APWEnv:
         self.left_gripper = next((link for link in self.robot.links if link.name == "Link7"), None)
         self.right_gripper = next((link for link in self.robot.links if link.name == "Link8"), None)
         # # Assuming you have these variables:
+        self.scene_entities={"robot":self.robot,
+                             "plane":self.plane}
+        
+        # self.scene.draw_debug_line(start=(0,0,0),end=(0,0,0.55),radius=0.25)
     
     def _random_quat_z(self,envs_idx):
         num_envs=envs_idx.shape[0]
@@ -234,6 +250,7 @@ class APWEnv:
         # envs_with_goto = envs_idx[goto_mask]
         # if len(envs_with_goto) > 0:
         self.commands[envs_idx, 4:7] = self._random_pos_near_base(envs_idx=envs_idx,scale=1.0)
+        self.commands[envs_idx, 6]=self.reward_cfg["base_height_target"]
         self.commands[envs_idx, 7:11] = self._random_quat_z(envs_idx=envs_idx)
 
 
@@ -260,7 +277,6 @@ class APWEnv:
         allowed_pairs = set(tuple(pair) for pair in exclude_collision)
 
         contact_info = entity.get_contacts(exclude_self_contact=True)
-        scene = self.scene
         links = entity.links
 
         link_a_ids = contact_info['link_a']       # shape: (n_envs, n_contacts)
@@ -268,27 +284,37 @@ class APWEnv:
         valid_mask = contact_info['valid_mask']   # shape: (n_envs, n_contacts)
 
         valid_envs = []
-
+        # print("contact_info is:",contact_info)
         for env_idx in env_indices:
             all_contacts_allowed = True
             for contact_idx in range(valid_mask.shape[1]):
                 if not valid_mask[env_idx, contact_idx]:
+                    print(f"continueing:{env_idx}")
                     continue
 
                 link_a = links[link_a_ids[env_idx, contact_idx]]
                 link_b = links[link_b_ids[env_idx, contact_idx]]
 
-                name_a = link_a.name
-                name_b = link_b.name
-
-                entity_a = link_a.entity.name
-                entity_b = link_b.entity.name
-
+                link_a_name = link_a.name
+                link_b_name = link_b.name
+                
+                # print('link a ',link_a,link_a.entity.links)
+                # entity_a_names=[link.name for link in link_a.entity.links]
+                # entity_b_names=[link.name for link in link_b.entity.links]
+                # entity_a = link_a.entity.name
+                # entity_b = link_b.entity.name
+                entity_a_entity=self.scene.rigid_solver.links[link_a_ids[env_idx, contact_idx]].entity
+                entity_b_entity=self.scene.rigid_solver.links[link_a_ids[env_idx, contact_idx]].entity
                 # Identify the robot's link in the contact
-                if link_a in entity_link_ids:
-                    pair = (name_a, entity_b)
-                elif link_b in entity_link_ids:
-                    pair = (name_b, entity_a)
+                for key,value in self.scene_entities.items():
+                    if entity.uid==entity_a_entity.uid:
+                        entity_a_name=key
+                    if entity.uid==entity_b_entity.uid:
+                        entity_b_name=key
+                if link_a in self.robot.links:
+                    pair = (link_a_name, entity_b_name)
+                elif link_b in self.robot.links:
+                    pair = (link_b_name, entity_a_name)
                 else:
                     continue  # not involving robot
 
@@ -297,9 +323,11 @@ class APWEnv:
                     break  # no need to check more
 
             if all_contacts_allowed:
-                valid_envs.append(env_idx)
+                valid_envs.append(False)
+            else:
+                valid_envs.append(True)
 
-        return torch.tensor(valid_envs, dtype=torch.long)
+        return torch.tensor(valid_envs, dtype=torch.bool)
 
         
     def step(self, actions):
@@ -339,16 +367,16 @@ class APWEnv:
 
         # check termination and reset
         self.reset_buf = self.episode_length_buf > self.max_episode_length
-        # print("env_cfg_keys",self.env_cfg.keys())
+        # print("timed_out",self.reset_buf)
         self.reset_buf |= torch.abs(self.base_euler[:, 1]) > self.env_cfg["termination_criteria_roll"]
         self.reset_buf |= torch.abs(self.base_euler[:, 0]) > self.env_cfg["termination_criteria_pitch"]
         self.reset_buf |= torch.abs(self.robot.get_pos()[:, 2]) < self.env_cfg["termination_criteria_base_height"]
-        # self.reset_buf |= torch.abs(self._check_collisions(self.robot,np.arange(0,self.num_actions),self.env_cfg["contact_exclusion_pairs"]))
+        # self.reset_buf |= torch.abs(self._check_collisions(self.robot,np.arange(0,self.num_envs),self.env_cfg["contact_exclusion_pairs"]))
         
         time_out_idx = (self.episode_length_buf > self.max_episode_length).nonzero(as_tuple=False).reshape((-1,))
         self.extras["time_outs"] = torch.zeros_like(self.reset_buf, device=gs.device, dtype=gs.tc_float)
         self.extras["time_outs"][time_out_idx] = 1.0
-        print("resetting these",self.reset_buf)
+        # print("resetting these",self.reset_buf)
         self.reset_idx(self.reset_buf.nonzero(as_tuple=False).reshape((-1,)))
 
         # compute reward
@@ -449,7 +477,8 @@ class APWEnv:
             zero_velocity=True,
             envs_idx=envs_idx,
         )
-
+        print("sleeping",envs_idx.tolist())
+        # time.sleep(5)
         # reset base
         self.base_pos[envs_idx] = self.base_init_pos
         self.base_quat[envs_idx] = self.base_init_quat.reshape(1, -1)
@@ -481,7 +510,14 @@ class APWEnv:
             self.episode_sums[key][envs_idx] = 0.0
 
         self._resample_commands(envs_idx)
-
+        self.target_sphere.set_pos(self.commands[envs_idx, 4:7],envs_idx=envs_idx)
+        # for it,env_id in enumerate(envs_idx.cpu().tolist()):
+        #     if self.target_sphere[env_id] is not None:
+        #         self.scene.clear_debug_object(self.target_sphere[env_id])
+        #     offset=self.make_env_offset(env_id)
+        #     target_pos=self.commands[envs_idx[it], 4:7][0]-offset
+        #     self.target_sphere[env_id]=self.scene.draw_debug_sphere(pos=target_pos,radius=0.075)
+        
     def reset(self):
         self.reset_buf[:] = True
         self.reset_idx(torch.arange(self.num_envs, device=gs.device))
