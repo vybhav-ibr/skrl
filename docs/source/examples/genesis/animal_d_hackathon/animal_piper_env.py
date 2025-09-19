@@ -203,6 +203,10 @@ class APWEnv:
         self.scene_entities={"robot":self.robot,
                              "plane":self.plane}
         
+        self.dummy_depth= torch.zeros((self.num_envs,512, 512,1))
+        self.dummy_depth_small= torch.zeros((self.num_envs,128, 128,1))
+        self.dummy_image= torch.zeros((self.num_envs,512, 512,3))
+        
         # self.scene.draw_debug_line(start=(0,0,0),end=(0,0,0.55),radius=0.25)
     
     def _random_quat_z(self,envs_idx):
@@ -402,18 +406,15 @@ class APWEnv:
         # print("robot_pos",self.robot.get_pos().shape)
         # print("robot_quat",self.robot.get_pos().shape)
         # print("#"*20)
-        dummy_depth= torch.zeros((self.num_envs,512, 512,1))
-        dummy_depth_small= torch.zeros((self.num_envs,128, 128,1))
-        dummy_image= torch.zeros((self.num_envs,512, 512,3))
         self.obs_buf = torch.cat(
             [
-                dummy_depth_small.view(self.num_envs, -1),
+                self.dummy_depth_small.view(self.num_envs, -1),
                 self.commands, # 3
                 (self.dof_pos - self.default_dof_pos) * self.obs_scales["dof_pos"],  # 12
                 self.dof_vel * self.obs_scales["dof_vel"],  # 12
-                dummy_depth_small.view(self.num_envs, -1),
-                dummy_depth.view(self.num_envs, -1),
-                dummy_image.view(self.num_envs, -1),
+                self.dummy_depth_small.view(self.num_envs, -1),
+                self.dummy_depth.view(self.num_envs, -1),
+                self.dummy_image.view(self.num_envs, -1),
                 self.obj_pos,
                 self.obj_quat,
                 self.robot.get_pos(),
