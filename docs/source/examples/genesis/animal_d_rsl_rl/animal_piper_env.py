@@ -172,25 +172,25 @@ class APWEnv:
         self.arm_links=[f"Link{k}" for k in range(1,9)]
         # for link in self.robot.links:
         #     print(link.name)
-        dummy_depth= torch.zeros((512, 512,1))
-        dummy_depth_small= torch.zeros((128, 128,1))
-        dummy_image= torch.zeros((512, 512,3))
+        # dummy_depth= torch.zeros((512, 512,1))
+        # dummy_depth_small= torch.zeros((128, 128,1))
+        # dummy_image= torch.zeros((512, 512,3))
         self.obs_space = {
             # "ang_vel":self.base_ang_vel[0] * self.obs_scales["ang_vel"],  # 3
-            "back_depth":dummy_depth_small,
+            # "back_depth":dummy_depth_small,
             "commands":self.commands[0] ,  # 3
             "dof_diff":(self.dof_pos[0] - self.default_dof_pos[0]) * self.obs_scales["dof_pos"],  # 12
             "dof_vel":self.dof_vel[0] * self.obs_scales["dof_vel"],  # 12
-            "front_depth":dummy_depth_small,
-            "gripper_depth":dummy_depth,
-            "gripper_img":dummy_image,
+            # "front_depth":dummy_depth_small,
+            # "gripper_depth":dummy_depth,
+            # "gripper_img":dummy_image,
             "object_pos":self.obj_pos[0],
             "object_quat":self.obj_quat[0],
             "robot_base_pos":self.robot.get_pos()[0],
             "robot_base_quat":self.robot.get_quat()[0],
             "taken_actions":self.actions[0],  # 12
         }
-        self.obs_buf= torch.zeros((self.num_envs, 1081429), device=gs.device, dtype=gs.tc_float)
+        self.obs_buf= torch.zeros((self.num_envs, 85), device=gs.device, dtype=gs.tc_float)
         
         self.all_envs_idx=torch.arange(0,self.num_envs,dtype=gs.tc_int)
         self.eef_pos_object_threshold=reward_cfg["eef_pos_object_threshold"]
@@ -203,9 +203,9 @@ class APWEnv:
         self.scene_entities={"robot":self.robot,
                              "plane":self.plane}
         
-        self.dummy_depth= torch.zeros((self.num_envs,512, 512,1))
-        self.dummy_depth_small= torch.zeros((self.num_envs,128, 128,1))
-        self.dummy_image= torch.zeros((self.num_envs,512, 512,3))
+        # self.dummy_depth= torch.zeros((self.num_envs,512, 512,1))
+        # self.dummy_depth_small= torch.zeros((self.num_envs,128, 128,1))
+        # self.dummy_image= torch.zeros((self.num_envs,512, 512,3))
         
         # self.scene.draw_debug_line(start=(0,0,0),end=(0,0,0.55),radius=0.25)
     
@@ -408,13 +408,13 @@ class APWEnv:
         # print("#"*20)
         self.obs_buf = torch.cat(
             [
-                self.dummy_depth_small.view(self.num_envs, -1),
+                # self.dummy_depth_small.view(self.num_envs, -1),
                 self.commands, # 3
                 (self.dof_pos - self.default_dof_pos) * self.obs_scales["dof_pos"],  # 12
                 self.dof_vel * self.obs_scales["dof_vel"],  # 12
-                self.dummy_depth_small.view(self.num_envs, -1),
-                self.dummy_depth.view(self.num_envs, -1),
-                self.dummy_image.view(self.num_envs, -1),
+                # self.dummy_depth_small.view(self.num_envs, -1),
+                # self.dummy_depth.view(self.num_envs, -1),
+                # self.dummy_image.view(self.num_envs, -1),
                 self.obj_pos,
                 self.obj_quat,
                 self.robot.get_pos(),
