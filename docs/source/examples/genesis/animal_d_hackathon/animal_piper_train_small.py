@@ -19,8 +19,8 @@ from scipy import signal
 import genesis as gs
 from animal_piper_env import APWEnv
 import numpy as np
-from ultralytics import YOLO
-from torchvision.transforms import Normalize
+# from ultralytics import YOLO
+# from torchvision.transforms import Normalize
 
 from skrl.utils.spaces.torch import compute_space_size
 from typing import List, Optional, Tuple, Union
