@@ -43,7 +43,7 @@ def get_cfgs():
         "base_init_quat":[1.0,0.0,0.0,0.0],
         "eef_link_name":"arm_L8_1",
         "pallet_origin":[1.5,0,0],
-        "pallet_size_xy":[1.21,1.01,1.01],
+        "pallet_size":[1.21,1.01,1.01],
         "conveyer_bounds_lower":[-1.5,-0.25,0.5],
         "conveyer_bounds_upper":[-0.75,0.25,0.5],
         "num_boxes_per_env":5,

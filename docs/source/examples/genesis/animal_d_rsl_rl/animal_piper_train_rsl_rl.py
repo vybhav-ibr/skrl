@@ -76,25 +76,24 @@ def get_cfgs():
             "LH_HAA": [0.0, 100, 5.0],
             "RH_HAA": [0.0, 100, 5.0],
 
-            "LF_HFE": [0.8, 100, 5.0],
-            "RF_HFE": [0.8, 100, 5.0],
-            "LH_HFE": [-0.8, 100, 5.0],
-            "RH_HFE": [-0.8, 100, 5.0],
+            "LF_HFE": [0.4, 100, 5.0],
+            "RF_HFE": [0.4, 100, 5.0],
+            "LH_HFE": [-0.4, 100, 5.0],
+            "RH_HFE": [-0.4, 100, 5.0],
 
-            "LF_KFE": [-1.5, 100, 5.0],
-            "RF_KFE": [-1.5, 100, 5.0],
-            "LH_KFE": [1.5, 100, 5.0],
-            "RH_KFE": [1.5, 100, 5.0],
+            "LF_KFE": [-0.75, 100, 5.0],
+            "RF_KFE": [-0.75, 100, 5.0],
+            "LH_KFE": [0.75, 100, 5.0],
+            "RH_KFE": [0.75, 100, 5.0],
 
             "joint1": [0.0,80,5.0],
-            "joint2": [0.0,80,5.0],
-            "joint3": [0.0,80,5.0],
+            "joint2": [0.87,80,5.0],
+            "joint3": [-0.87,80,5.0],
             "joint4": [0.0,40,5.0],
             "joint5": [0.0,10,1.5],
             "joint6": [0.0,10,1.5],
             "joint7": [0.0,40.0,5],
             "joint8": [0.0,40.0,5],
-            
         },
         "arm_pick_pos": {
             "joint1": [0.0],
@@ -111,16 +110,16 @@ def get_cfgs():
         # termination
         "termination_criteria_roll": 25,  # degree
         "termination_criteria_pitch": 25,
-        "termination_criteria_base_height": 0.35,
+        "termination_criteria_base_height": 0.45,
         "contact_exclusion_pairs": #link,entity
             [["LH_FOOT","plane"],
              ["RH_FOOT","plane"],
              ["LF_FOOT","plane"],
              ["RH_FOOT","plane"]],
         # base pose
-        "base_init_pos": [0.0, 0.0, 0.55],
+        "base_init_pos": [0.0, 0.0, 0.67],
         "base_init_quat": [1.0, 0.0, 0.0, 0.0],
-        "episode_length_s": 75.0,
+        "episode_length_s": 25.0,
         "resampling_time_s": 4.0,
         "action_scale": 0.25,
         "simulate_action_latency": True,
@@ -141,7 +140,7 @@ def get_cfgs():
         },
     }
     reward_cfg = {
-        "base_height_target": 0.55,
+        "base_height_target": 0.50,
         "eef_pos_object_threshold":0.25,
         "reward_scales": {
             "survival":0.5,
@@ -150,11 +149,12 @@ def get_cfgs():
             # "pick_grasp_object":1.0,
             # "place_ungrasp_object":1.0,
             # "place_object_pos_basket":1.0,
-            "goto":10.0,
-            "high_joint_force":-0.005,
-            "action_rate":-0.01,
-            "base_height":-10.0,
-            "goal_proximity":1.0
+            "goto":15.0,
+            "high_joint_force":-0.5,
+            "action_rate":-0.025,
+            # "base_height":-10.0,
+            "goal_proximity":0.75,
+            "similar_to_default": -0.01,
         }
     }
     command_cfg = {

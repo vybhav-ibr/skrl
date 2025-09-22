@@ -53,7 +53,6 @@ def get_cfgs():
             "joint6": [0.0,10,1.5],
             "joint7": [0.0,40.0,5],
             "joint8": [0.0,40.0,5],
-            
         },
         "arm_pick_pos": {
             "joint1": [0.0],

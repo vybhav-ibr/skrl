@@ -35,7 +35,7 @@ class APWEnv:
         self.device = gs.device
 
         self.simulate_action_latency = True  # there is a 1 step latency on real robot
-        self.dt = 0.02  # control frequency on real robot is 50hz
+        self.dt = 0.05  # control frequency on real robot is 50hz
         self.max_episode_length = math.ceil(env_cfg["episode_length_s"] / self.dt)
 
         self.env_cfg = env_cfg
@@ -55,7 +55,8 @@ class APWEnv:
                 camera_lookat=(0.0, 0.0, 0.5),
                 camera_fov=40,
             ),
-            vis_options=gs.options.VisOptions(),#rendered_envs_idx=list(range(self.num_envs//2,self.num_envs//2+4))),
+            vis_options=gs.options.VisOptions(
+                rendered_envs_idx=list(range(self.num_envs//2,self.num_envs//2+4))),
             rigid_options=gs.options.RigidOptions(
                 dt=self.dt,
                 constraint_solver=gs.constraint_solver.Newton,
@@ -80,7 +81,7 @@ class APWEnv:
                 quat=self.base_init_quat.cpu().numpy(),
                 links_to_keep=self.env_cfg["links_to_keep"]
             ),
-            visualize_contact=True
+            visualize_contact=False
         )
         self.target_sphere=self.scene.add_entity(
             gs.morphs.Sphere(
@@ -113,7 +114,7 @@ class APWEnv:
             self.robot.set_dofs_kv([dof_properties[2]],dof_idx)
 
         # prepare reward functions and multiply reward scales by dt
-        self.reward_functions, self.episode_sums = dict(), dict()
+        self.reward_functions, self.episode_sums,self.last_episode_sums = dict(), dict(), dict()
         for name in self.reward_scales.keys():
             self.reward_scales[name] *= self.dt
             self.reward_functions[name] = getattr(self, "_reward_" + name)
@@ -219,16 +220,13 @@ class APWEnv:
         return quat
 
     # def _sample_TF_command(self,envs_idx,cond_index=None):
-    def _random_pos_near_base(self,envs_idx,scale):
+    def _random_pos_near_base(self, envs_idx, scale):
         """
-        Samples new positions at a certain (scaled) distance from poses specified by envs_idx.
+        Samples new positions at a certain (scaled) distance from robot base positions.
 
         Args:
-            pose_tensor (torch.Tensor): Tensor of shape (n_envs, 3), original poses.
-            envs_idx (torch.Tensor or list): Indices of poses to sample from, length = k.
-            distance (float): Base distance for sampling.
-            scale (float): Scaling factor for distance.
-            device (str or torch.device, optional): Device to use.
+            envs_idx (torch.Tensor or list): Indices of envs to sample positions for.
+            scale (float): Scaling factor for sampling distance.
 
         Returns:
             torch.Tensor: Sampled positions of shape (k, 3)
@@ -241,10 +239,13 @@ class APWEnv:
         random_dirs = random_dirs / torch.norm(random_dirs, dim=1, keepdim=True)
 
         offset = random_dirs * 1.0 * scale
-
         sampled_pos = selected_poses + offset
 
+        # Clamp the Y-coordinate (index 1) to [-0.5, 0.5]
+        sampled_pos[:, 1] = torch.clamp(sampled_pos[:, 1], min=-0.5, max=0.5)
+
         return sampled_pos
+
 
     def _resample_commands(self, envs_idx):
 
@@ -253,7 +254,15 @@ class APWEnv:
         # goto_mask = self.commands[envs_idx, 2] > 0.0
         # envs_with_goto = envs_idx[goto_mask]
         # if len(envs_with_goto) > 0:
-        self.commands[envs_idx, 4:7] = self._random_pos_near_base(envs_idx=envs_idx,scale=1.0)
+        last_goto_rewards=sum(self.last_episode_sums["goto"])/envs_idx.shape[0]
+        last_survival_rewards=sum(self.last_episode_sums["survival"])/envs_idx.shape[0]
+        # print(self.last_episode_sums.keys())
+        # exit(0)
+        # print("last_goto_rw",last_goto_rewards)
+        # print("last_survival_rw",last_survival_rewards)
+        base_pos=self.robot.get_pos(envs_idx)[:][0]
+        sample_scale=1.0+(sum(base_pos))/envs_idx.shape[0]
+        self.commands[envs_idx, 4:7] = self._random_pos_near_base(envs_idx=envs_idx,scale=sample_scale)
         self.commands[envs_idx, 6]=self.reward_cfg["base_height_target"]
         self.commands[envs_idx, 7:11] = self._random_quat_z(envs_idx=envs_idx)
 
@@ -390,8 +399,9 @@ class APWEnv:
         for name, reward_func in self.reward_functions.items():
             # print(name,":",self.reward_scales[name],"",reward_func())
             rew = reward_func() * self.reward_scales[name]
-            # print(name,"!!!",rew)
+            # print(name,"!:!",rew)
             self.rew_buf += rew
+            # print("reward_buf",self.rew_buf)
             self.episode_sums[name] += rew
         
         # print("rew_buf",self.rew_buf)
@@ -427,6 +437,7 @@ class APWEnv:
         self.last_actions[:] = self.actions[:]
         self.last_dof_vel[:] = self.dof_vel[:]
         self.last_commands[:] = self.commands[:]
+        self.last_episode_sums = self.episode_sums
         # self.last_rewards[:] = self.rew_buf[:]
         # self.extras["observations"]["critic"] = self.obs_buf
         # Print the shapes of the tensors before the view operation
@@ -478,7 +489,7 @@ class APWEnv:
             zero_velocity=True,
             envs_idx=envs_idx,
         )
-        print("sleeping",envs_idx.tolist())
+        # print("sleeping",envs_idx.tolist())
         # time.sleep(5)
         # reset base
         self.base_pos[envs_idx] = self.base_init_pos
@@ -492,6 +503,8 @@ class APWEnv:
         # reset buffers
         self.last_actions[envs_idx] = 0.0
         self.last_dof_vel[envs_idx] = 0.0
+        # for key in self.last_episode_sums.keys():
+        #     self.last_episode_sums[key][envs_idx] = 0.0
         self.episode_length_buf[envs_idx] = 0
         self.reset_buf[envs_idx] = True
 
@@ -625,6 +638,12 @@ class APWEnv:
             return reward
         return reward
     
+    def _reward_similar_to_default(self):
+        reward= torch.zeros_like(self.all_envs_idx,dtype=gs.tc_float)
+        robot_dofs_position=self.robot.get_dofs_position(self.motors_dof_idx)
+        reward=torch.norm(robot_dofs_position-self.default_dof_pos)
+        return reward
+    
     def _reward_pick_eef_pos_object(self):
         reward= torch.zeros_like(self.all_envs_idx,dtype=gs.tc_float)
         pick_mask = self.commands[:, 1] > 0.0  # Boolean tensor, same length as envs_idx
@@ -746,9 +765,9 @@ class APWEnv:
         
     def _reward_goto(self):
         reward= torch.zeros_like(self.all_envs_idx,dtype=gs.tc_float)
-        place_mask = self.commands[:, 1] > 0.0  # Boolean tensor, same length as envs_idx
-        envs_with_place = self.all_envs_idx[place_mask]
-        if len(envs_with_place) > 0:
+        goto_mask = self.commands[:, 2] > 0.0  # Boolean tensor, same length as envs_idx
+        envs_with_goto = self.all_envs_idx[goto_mask]
+        if len(envs_with_goto) > 0:
             base_pos = self.robot.get_pos().squeeze(1) 
             base_quat = self.robot.get_quat().squeeze(1) 
 
@@ -764,18 +783,20 @@ class APWEnv:
 
             # Combine errors
             reward = torch.exp(-2.0 * pos_error) * torch.exp(-1.0 * ang_error)
-            # print("_reward_pos_alignment:", reward.shape)
+            # print("_reward_pos_alignment:", reward)
             return reward
         return reward    
 
     def _reward_high_joint_force(self):
-        joint_torques = self.robot.get_dofs_force(self.motors_dof_idx)
-        reward = torch.sum(torch.square(joint_torques), dim=1)
-        # print("_reward_high_joint_force:", reward.shape)
+        joint_forces = self.robot.get_dofs_force(self.motors_dof_idx)
+        joint_kp= self.robot.get_dofs_kp(self.motors_dof_idx)
+        reward = torch.abs(torch.sum(joint_forces/joint_kp, dim=1))
+        # print("_reward_high_joint_force:", reward)
         return reward
 
     def _reward_action_rate(self):
-        reward = torch.sum(torch.square(self.last_actions - self.actions), dim=1)
+        # print(self.last_actions[:,:-8].shape)
+        reward = torch.sum(torch.square(self.last_actions[:,:-8] - self.actions[:,:-8]), dim=1)
         # print("_reward_action_rate:", reward.shape)
         return reward
 

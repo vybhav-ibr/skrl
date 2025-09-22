@@ -10,11 +10,16 @@ import random
 # Reward is conditional on command mode: pick, goto-home, place, change-pallet.
 # Top-down pallet image (depth + segmentation) updates only after successful place.
 
+import numpy as np
+import torch
+import time
+
 class BoxFactory:
-    def __init__(self, scene, n_envs, n_boxes, conveyer_bounds_lower, conveyer_bounds_upper):
+    def __init__(self, scene, n_envs, n_boxes, conveyer_bounds_lower, conveyer_bounds_upper, pallet_volume):
         self.n_envs = n_envs
         self.n_boxes = n_boxes
         self.conveyer_bounds = np.array([conveyer_bounds_lower, conveyer_bounds_upper])  # shape (2, 3)
+        self.pallet_volume = pallet_volume
 
         # Fixed box sizes
         self.box_sizes = np.array([
@@ -27,13 +32,17 @@ class BoxFactory:
         self.initial_positions = []  # To store initial positions of the boxes
         for box_id in range(n_boxes):
             # Initial positions of the boxes when added to the scene
-            initial_pos = (0, 0, -(box_id + 5.5))
+            box_size=self.box_sizes[box_id]
+            initial_pos = (0, 0, -((box_id)*0.725+box_size[2]/2+0.720))
             ent = scene.add_entity(
                 gs.morphs.Box(
                     pos=initial_pos,
-                    size=self.box_sizes[box_id],
-                    fixed=True
-                )
+                    size=box_size,
+                    fixed=False,
+                    # collision=False
+                    
+                ),
+                vis_mode="collision"
             )
             self.entities.append(ent)
             self.initial_positions.append(initial_pos)  # Store initial position
@@ -42,9 +51,21 @@ class BoxFactory:
         self.active_box_indices = np.full(n_envs, -1, dtype=int)
         self.active_positions = np.zeros((n_envs, 3), dtype=np.float32)
         self.active_sizes = np.zeros((n_envs, 3), dtype=np.float32)
+        
+        # Additional attributes
+        self.suction_on = [False for _ in range(n_envs)]
+        self.placed_box_sizes = [[] for _ in range(n_envs)]
 
-    def appear(self, envs_idx):
+    def _get_underground_pos(self, box_id):
+        """ Helper function to compute the underground position """
+        pos = np.copy(self.initial_positions[box_id])
+        # pos[2] = -(box_id + 1)
+        return pos
+
+    def appear(self, envs_idx, last_mode_mask):
         envs_idx = envs_idx.cpu().numpy()
+        last_mode_mask_np = last_mode_mask.cpu().numpy()
+
         bounds_min = self.conveyer_bounds[0]
         bounds_max = self.conveyer_bounds[1]
         ranges = bounds_max - bounds_min
@@ -53,27 +74,77 @@ class BoxFactory:
         positions = np.random.uniform(0, 1, size=(len(envs_idx), 3)) * ranges + bounds_min
         sizes = self.box_sizes[chosen_box_indices]
 
-        # Iterate over the environment indices to place the chosen box and underground boxes
         for i, env_id in enumerate(envs_idx):
             chosen_box_id = chosen_box_indices[i]
             pos = positions[i]
 
-            # Set the position of the chosen box
-            self.active_box_indices[env_id] = chosen_box_id
-            self.active_positions[env_id] = pos
-            self.active_sizes[env_id] = self.box_sizes[chosen_box_id]
-            self.entities[chosen_box_id].set_pos(pos[np.newaxis, :], envs_idx=np.array([env_id]))
+            if last_mode_mask_np[i]:  # last was pick -> restore previous box
+                prev_box_id = self.active_box_indices[env_id]
+                if prev_box_id != -1:
+                    underground_pos = self._get_underground_pos(prev_box_id)
+                    self.entities[prev_box_id].set_pos(underground_pos[np.newaxis, :], envs_idx=np.array([env_id]))
 
-            # Place the remaining boxes underground with their z-axis determined by their own index
-            for box_id in range(self.n_boxes):
-                if box_id != chosen_box_id:
-                    # Set the z-coordinate based on the object's own index (not the chosen box's index)
-                    underground_pos = np.copy(self.initial_positions[box_id])  # Use the initial position for non-chosen boxes
-                    underground_pos[2] = -(box_id + 1)  # Set the z-coordinate underground
-                    self.entities[box_id].set_pos(underground_pos[np.newaxis, :], envs_idx=np.array([env_id]))
+                self.active_box_indices[env_id] = -1
+                self.active_positions[env_id] = 0.0
+                self.active_sizes[env_id] = 0.0
+
+            else:
+                # Place new box
+                self.active_box_indices[env_id] = chosen_box_id
+                self.active_positions[env_id] = pos
+                self.active_sizes[env_id] = self.box_sizes[chosen_box_id]
+                self.entities[chosen_box_id].set_pos(pos[np.newaxis, :], envs_idx=np.array([env_id]))
 
         return torch.tensor(positions, dtype=gs.tc_float), torch.tensor(sizes, dtype=gs.tc_float)
+        
+    def suction_switch(self, suction_mask):
+        """
+        Turn suction on or off based on the input mask and contact check.
+
+        Args:
+            suction_mask (torch.BoolTensor): shape (n_envs,), True = attempt to enable suction
+        """
+        for env_id in range(self.n_envs):
+            if suction_mask[env_id]:
+                if self._check_contact_and_pos(env_id):  # <-- Check if contact is made and valid
+                    if not self.suction_on[env_id]:  # Only add suction if it's not already on
+                        self.add_suction_constraint(env_id)  # Add suction constraint
+                        self.suction_on[env_id] = True
+            else:
+                if self.suction_on[env_id]:  # Only remove suction if it's currently on
+                    self.remove_suction_constraint(env_id)  # Remove suction constraint
+                    self.suction_on[env_id] = False
     
+    def add_suction_constraint(self, env_id):
+        """
+        Add a suction constraint between the end-effector and the object.
+        This works by adding a 'weld' or similar constraint to simulate suction.
+        
+        Args:
+            env_id (int): The environment ID where the suction should be applied.
+        """
+        rigid = self.scene.sim.rigid_solver
+        link_cube = np.array([self.entities[self.active_box_indices[env_id]].get_link("box_baselink").idx], dtype=gs.np_int)
+        link_ur = np.array([self.ur.get_link("ee_virtual_link").idx], dtype=gs.np_int)
+        
+        # Assuming add_weld_constraint is the correct function for "suction"
+        rigid.add_weld_constraint(link_cube, link_ur, envs_idx=[env_id])
+
+
+    def remove_suction_constraint(self, env_id):
+        """
+        Remove the suction constraint between the end-effector and the object.
+        
+        Args:
+            env_id (int): The environment ID where the suction constraint should be removed.
+        """
+        rigid = self.scene.sim.rigid_solver
+        link_cube = np.array([self.entities[self.active_box_indices[env_id]].get_link("box_baselink").idx], dtype=gs.np_int)
+        link_ur = np.array([self.ur.get_link("ee_virtual_link").idx], dtype=gs.np_int)
+        
+        # Assuming remove_weld_constraint is the correct function to remove the suction
+        rigid.remove_weld_constraint(link_cube, link_ur, envs_idx=[env_id])
+
     def update_pos(self):
         """
         Update self.active_positions for all envs by querying entity positions
@@ -86,7 +157,35 @@ class BoxFactory:
             # get_pos returns positions for all envs for this box entity
             all_positions = self.entities[box_id].get_pos().cpu().numpy()  # shape (n_envs, 3)
             self.active_positions[env_id] = all_positions[env_id]
-        
+
+    def reset_pallet(self, envs_idx):
+        for i in range(envs_idx.shape[0]):
+            env_id = envs_idx[i].item()
+            for box_id in range(self.n_boxes):
+                underground_pos = self._get_underground_pos(box_id)
+                self.entities[box_id].set_pos(underground_pos[np.newaxis, :], envs_idx=np.array([env_id]))
+
+            self.active_box_indices[env_id] = -1
+            self.active_positions[env_id] = 0.0
+            self.active_sizes[env_id] = 0.0
+            self.placed_box_sizes[env_id] = []
+
+    def record_placed_box(self, envs_idx):
+        for env_id in envs_idx:
+            env_id = env_id.item()
+            box_id = self.active_box_indices[env_id]
+            if box_id != -1:
+                size = self.box_sizes[box_id]
+                self.placed_box_sizes[env_id].append(size)
+
+    def get_pallet_fill_ratio(self):
+        fill_ratios = []
+        for box_list in self.placed_box_sizes:
+            total_volume = sum([np.prod(box_size) for box_size in box_list])
+            fill_ratio = total_volume / self.pallet_volume
+            fill_ratios.append(min(fill_ratio, 1.0))  # Clamp to 1.0
+        return torch.tensor(fill_ratios, dtype=torch.float32)
+
 class PalletizeEnv(BoxFactory):
     def __init__(self, num_envs, env_cfg, obs_cfg, reward_cfg, command_cfg, show_viewer=False):
         self.num_envs = num_envs
@@ -128,6 +227,7 @@ class PalletizeEnv(BoxFactory):
                 enable_collision=True,
                 enable_joint_limit=True,
                 enable_self_collision=False,
+                gravity=(0,0,9.8)
             ),
             show_viewer=show_viewer,
         )
@@ -140,21 +240,48 @@ class PalletizeEnv(BoxFactory):
         self.inv_base_init_quat = inv_quat(self.base_init_quat)
         self.robot = self.scene.add_entity(
             gs.morphs.URDF(
-                file="/home/vybhav/gs_gym_wrapper_reference/skrl/docs/source/examples/genesis/dex_bot/dex_bot.urdf",
+                file="skrl/docs/source/examples/genesis/dex_bot/dex_bot.urdf",
                 pos=self.base_init_pos.cpu().numpy(),
                 quat=self.base_init_quat.cpu().numpy(),
                 fixed=True,
                 links_to_keep=env_cfg.get("links_to_keep", []),
             ),
-            visualize_contact=True,
+            visualize_contact=False,
         )
+        self.conveyer=self.scene.add_entity(
+            gs.morphs.Box(
+                pos=(-3,0,0.25),
+                size=(5,2,0.5),
+                fixed=True
+            ),
+        )
+        # self.box_rack=self.scene.add_entity(
+        #     gs.morphs.Mesh(
+        #         file="skrl/docs/source/examples/genesis/obj_rack.obj",
+        #         pos=(0,0,-0.3),
+        #         scale=0.01,
+        #         fixed=True,
+        #         convexify=False,
+        #         decimate=False,
+        #         visualization=True
+        #     ),
+        #     vis_mode="collision",
+        #     visualize_contact=True,
+        # )
         # for i in range(50):
         #     self.scene.add_entity(gs.morphs.Box(
         #     pos=(0,0,-i-2.5),
         #     size=[random.sample(range(10, 20), 1),random.sample(range(10, 20), 1),0.5],
         #     fixed=True
         # ))
-        self.box_factory=BoxFactory(self.scene,self.num_envs,env_cfg["num_boxes_per_env"],env_cfg["conveyer_bounds_lower"],env_cfg["conveyer_bounds_upper"])
+        
+        # Pallet params and occupancy grid
+        self.pallet_origin = torch.tensor(env_cfg["pallet_origin"], device=self.device, dtype=gs.tc_float)  # (3,)
+        self.pallet_size = env_cfg["pallet_size"]
+        self.pallet_volume=self.pallet_size[0]*self.pallet_size[0]*self.pallet_size[1]*self.pallet_size[2]
+        self.box_factory=BoxFactory(self.scene,self.num_envs,
+                                    env_cfg["num_boxes_per_env"],env_cfg["conveyer_bounds_lower"],
+                                    env_cfg["conveyer_bounds_upper"],pallet_volume=self.pallet_volume)
 
         # Name mappings and DOF indices (expecting 7 actuated joints names provided)
         self.dof_names = env_cfg["default_dof_properties"].keys()  # list of 7 joint names
@@ -180,7 +307,7 @@ class PalletizeEnv(BoxFactory):
         self.obs_buf = torch.zeros((num_envs, self.num_obs), device=self.device, dtype=gs.tc_float)
         # print("obs buf size",self.obs_buf.shape)
         # Scene build
-        self.scene.build(n_envs=num_envs, env_spacing=tuple(env_cfg.get("env_spacing", (2, 2))), n_envs_per_row=num_envs)
+        self.scene.build(n_envs=num_envs, env_spacing=tuple(env_cfg.get("env_spacing", (4, 4))), n_envs_per_row=num_envs)
         
         # PD gains
         for jname, props in env_cfg["default_dof_properties"].items():
@@ -195,16 +322,12 @@ class PalletizeEnv(BoxFactory):
             raise ValueError("eef_link_name must be provided in env_cfg")
         self.eef_link_idx = self.robot.get_link(self.eef_link_name).idx_local
 
-        # Pallet params and occupancy grid
-        self.pallet_origin = torch.tensor(env_cfg["pallet_origin"], device=self.device, dtype=gs.tc_float)  # (3,)
-        self.pallet_size_xy = torch.tensor(env_cfg["pallet_size_xy"], device=self.device, dtype=gs.tc_float)  # (2,) [Lx, Ly]
-        
         #set cam origin, Top-down pose over pallet center for env i
         for cam in self.top_cams:           
             pal_center = self.pallet_origin.cpu().numpy().tolist()
             cam.set_pose(
                 pos=(pal_center[0], pal_center[1], self.cam_height),
-                lookat=(pal_center[0], pal_center[1], 0.5 * self.pallet_size_xy[1].item()),
+                lookat=(pal_center[0], pal_center[1], pal_center[2]),
                 up=(1.0, 0.0, 0.0),  # roll to look straight down (adjust as needed)
             )
         # Pallet image cache (depth and segmentation), updated only on place success
@@ -255,6 +378,15 @@ class PalletizeEnv(BoxFactory):
         self.home_quat = self.base_init_quat.clone()
         self.home_pos = self.base_init_pos.clone()
         self.home_eef_tol = env_cfg.get("home_eef_tol", 0.02)
+        
+        # for _
+        for _ in range(10000):
+            time.sleep(1)
+            self.scene.step()
+            print("acc",self.box_factory.entities[0].get_links_acc()[0])
+            print("pos",self.box_factory.entities[0].get_links_pos()[0])
+            # self.scene.visualizer.update()
+        exit(0)
 
     def _set_mode(self, mode_tensor_int):
         # commands[:,0] stores mode as int; for pick, commands[:,1:11] carries [pos(3), quat(4), size(3)]
@@ -276,7 +408,7 @@ class PalletizeEnv(BoxFactory):
         else:
             envs_idx = torch.arange(self.num_envs, device=self.device)[envs_idx]
         self.commands[envs_idx, 0] = 0  # pick
-        self.commands[envs_idx, 1:4],self.commands[envs_idx, 4:7] = self.box_factory.appear(envs_idx=envs_idx)
+        self.commands[envs_idx, 1:4],self.commands[envs_idx, 4:7] = self.box_factory.appear(envs_idx=envs_idx,last_mode_mask=self.last_mode)
         self.box_size[envs_idx] = self.commands[envs_idx, 4:7]
 
     def _eef_pose(self):
@@ -485,7 +617,7 @@ class PalletizeEnv(BoxFactory):
         # if full_mask.any():
         #     idx = torch.nonzero(full_mask, as_tuple=False).squeeze(-1)
         #     self.top_image[idx] = 0.0
-        self._change_pallet(change_pallet_cmd)
+        self.box_factory.reset_pallet(change_pallet_cmd)
 
         # Timeout-based resets
         self.reset_buf = (self.episode_length_buf > self.max_episode_length)
@@ -514,7 +646,7 @@ class PalletizeEnv(BoxFactory):
         if place_mask.any():
             r = self._reward_place()
             self.rew_buf += self.reward_scales.get("place", 1.0) * r * place_mask.float()
-        self.rew_buf += self.reward_scales.get("change_pallet", 1.0) * (fill_ratio - 1.0) * change_pallet_cmd.float()
+        self.rew_buf += self.reward_scales.get("change_pallet", 1.0) * self.box_factory.get_pallet_fill_ratio() * change_pallet_cmd.float()
 
         if "action_rate" in self.reward_scales:
             self.rew_buf += self.reward_scales["action_rate"] * torch.sum(torch.square(self.last_actions - self.actions), dim=1)
