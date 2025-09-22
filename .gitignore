@@ -2,6 +2,8 @@
 # Created by https://www.toptal.com/developers/gitignore/api/python,c,c++,visualstudiocode,cmake
 # Edit at https://www.toptal.com/developers/gitignore?templates=python,c,c++,visualstudiocode,cmake
 
+runs/
+logs/
 ### Other files ###
 *.xml
 *.mp4

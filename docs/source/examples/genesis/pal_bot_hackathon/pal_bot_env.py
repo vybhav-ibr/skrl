@@ -227,12 +227,12 @@ class PalletizeEnv(BoxFactory):
                 enable_collision=True,
                 enable_joint_limit=True,
                 enable_self_collision=False,
-                gravity=(0,0,9.8)
+                gravity=(0,0,-9.8)
             ),
             show_viewer=show_viewer,
         )
 
-        self.plane = self.scene.add_entity(gs.morphs.URDF(file="urdf/plane/plane.urdf", fixed=True))
+        # self.plane = self.scene.add_entity(gs.morphs.URDF(file="urdf/plane/plane.urdf", fixed=True),vis_mode="collision")
 
         # Robot
         self.base_init_pos = torch.tensor(env_cfg["base_init_pos"], device=self.device, dtype=gs.tc_float)
@@ -255,19 +255,19 @@ class PalletizeEnv(BoxFactory):
                 fixed=True
             ),
         )
-        # self.box_rack=self.scene.add_entity(
-        #     gs.morphs.Mesh(
-        #         file="skrl/docs/source/examples/genesis/obj_rack.obj",
-        #         pos=(0,0,-0.3),
-        #         scale=0.01,
-        #         fixed=True,
-        #         convexify=False,
-        #         decimate=False,
-        #         visualization=True
-        #     ),
-        #     vis_mode="collision",
-        #     visualize_contact=True,
-        # )
+        self.box_rack=self.scene.add_entity(
+            gs.morphs.Mesh(
+                file="skrl/docs/source/examples/genesis/obj_rack.obj",
+                pos=(0,0,-0.3),
+                scale=0.01,
+                fixed=True,
+                convexify=False,
+                decimate=False,
+                visualization=True
+            ),
+            vis_mode="collision",
+            visualize_contact=True,
+        )
         # for i in range(50):
         #     self.scene.add_entity(gs.morphs.Box(
         #     pos=(0,0,-i-2.5),
@@ -379,14 +379,14 @@ class PalletizeEnv(BoxFactory):
         self.home_pos = self.base_init_pos.clone()
         self.home_eef_tol = env_cfg.get("home_eef_tol", 0.02)
         
-        # for _
-        for _ in range(10000):
-            time.sleep(1)
-            self.scene.step()
-            print("acc",self.box_factory.entities[0].get_links_acc()[0])
-            print("pos",self.box_factory.entities[0].get_links_pos()[0])
-            # self.scene.visualizer.update()
-        exit(0)
+        # # for _
+        # for _ in range(10000):
+        #     time.sleep(1)
+        #     self.scene.step()
+        #     print("acc",self.box_factory.entities[0].get_links_acc()[0])
+        #     print("pos",self.box_factory.entities[0].get_links_pos()[0])
+        #     # self.scene.visualizer.update()
+        # exit(0)
 
     def _set_mode(self, mode_tensor_int):
         # commands[:,0] stores mode as int; for pick, commands[:,1:11] carries [pos(3), quat(4), size(3)]
