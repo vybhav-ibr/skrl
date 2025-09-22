@@ -257,7 +257,7 @@ class PalletizeEnv(BoxFactory):
         )
         self.box_rack=self.scene.add_entity(
             gs.morphs.Mesh(
-                file="skrl/docs/source/examples/genesis/obj_rack.obj",
+                file="skrl/docs/source/examples/genesis/dex_bot/meshes/obj_rack.obj",
                 pos=(0,0,-0.3),
                 scale=0.01,
                 fixed=True,
