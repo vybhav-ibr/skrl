@@ -140,21 +140,21 @@ def get_cfgs():
         },
     }
     reward_cfg = {
-        "base_height_target": 0.50,
+        "base_height_target": 0.55,
         "eef_pos_object_threshold":0.25,
         "reward_scales": {
-            "survival":0.5,
+            # "survival":5,
             # "home":10.0,
             # "pick_eef_pos_object":1.0,
             # "pick_grasp_object":1.0,
             # "place_ungrasp_object":1.0,
             # "place_object_pos_basket":1.0,
-            "goto":15.0,
-            "high_joint_force":-0.5,
-            "action_rate":-0.025,
+            "goto":5.0,
+            "high_joint_force":-0.75,
+            # "action_rate":-0.025,
             # "base_height":-10.0,
-            "goal_proximity":0.75,
-            "similar_to_default": -0.01,
+            # "goal_proximity":0.375,
+            "similar_to_default": -0.0125,
         }
     }
     command_cfg = {
@@ -165,7 +165,7 @@ def get_cfgs():
         # "deliver":[True,False],
         
         "goto":[True,False],
-        "goto_pos": [[0,5],[-0.5,0.5],[0.65,0.35]],
+        "goto_pos": [[0,5],[-0.125,0.125],[0.65,0.35]],
         "goto_quat": [[-1,1],[-1,1],[-1,1],[-1,1]],
         
         "place":[True,False],

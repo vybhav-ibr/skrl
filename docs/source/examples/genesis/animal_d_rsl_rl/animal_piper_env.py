@@ -2,7 +2,7 @@ import torch
 import math
 import genesis as gs
 import numpy as np
-from genesis.utils.geom import quat_to_xyz, transform_by_quat, inv_quat, transform_quat_by_quat
+from genesis.utils.geom import quat_to_xyz, transform_by_quat, inv_quat, transform_quat_by_quat, quat_to_R
 from collections import OrderedDict
 from huggingface_hub import snapshot_download
 import time
@@ -24,6 +24,37 @@ def gs_rand_float(command, shape, device):
         sample = (upper - lower) * torch.rand(size=shape, device=device) + lower
         sampled.append(sample.unsqueeze(1))  # shape: [n, 1]
     return torch.cat(sampled, dim=1)  # shape: [n, 3]
+import torch
+
+def quat_to_rotation_matrix(quat):
+    w, x, y, z = quat
+    R = torch.stack([
+        torch.stack([1 - 2*(y*y + z*z),     2*(x*y - z*w),     2*(x*z + y*w)]),
+        torch.stack([    2*(x*y + z*w), 1 - 2*(x*x + z*z),     2*(y*z - x*w)]),
+        torch.stack([    2*(x*z - y*w),     2*(y*z + x*w), 1 - 2*(x*x + y*y)])
+    ])
+    return R
+
+def get_two_positions(pos, quat, distance=0.25):
+    """
+    pos: tensor of shape (3,)
+    quat: tensor of shape (4,) in (w, x, y, z) format
+    distance: scalar distance between start and end
+    """
+    # Get rotation matrix
+    R = quat_to_rotation_matrix(quat)
+    # Choose a reference direction in local frame — e.g. Z+ (0,0,1)
+    local_dir = torch.tensor([0.0, 0.0, 1.0], dtype=pos.dtype, device=pos.device)
+    # Rotate it into world frame
+    world_dir = R @ local_dir
+    # Normalize (just in case numerical drift)
+    world_dir = torch.nn.functional.normalize(world_dir, dim=0)
+    
+    half = distance / 2.0
+    start = pos - world_dir * half
+    end = pos + world_dir * half
+    return start.detach().cpu().numpy(), end.detach().cpu().numpy()
+
 
 class APWEnv:
     def __init__(self, num_envs, env_cfg, obs_cfg, reward_cfg, command_cfg, show_viewer=False):
@@ -204,19 +235,39 @@ class APWEnv:
         self.scene_entities={"robot":self.robot,
                              "plane":self.plane}
         
+        self.max_base_pos_buffer=[0.0,0.0,0.0,0.0,0.0]
+        self.running_max_base_pos=0.0
+        
         # self.dummy_depth= torch.zeros((self.num_envs,512, 512,1))
         # self.dummy_depth_small= torch.zeros((self.num_envs,128, 128,1))
         # self.dummy_image= torch.zeros((self.num_envs,512, 512,3))
         
         # self.scene.draw_debug_line(start=(0,0,0),end=(0,0,0.55),radius=0.25)
+        # for _ in range(1000):
+        #     self.scene.step()
     
-    def _random_quat_z(self,envs_idx):
-        num_envs=envs_idx.shape[0]
+    # def _random_quat_z(self,envs_idx):
+    #     num_envs=envs_idx.shape[0]
+    #     theta = torch.rand(num_envs) * 2 * torch.pi  # angle in [0, 2π)
+    #     half_theta = theta / 2
+    #     quat = torch.zeros((num_envs, 4))
+    #     quat[:, 2] = torch.sin(half_theta)  # z
+    #     quat[:, 3] = torch.cos(half_theta)  # w
+    #     return quat
+    def _random_quat_z(self, envs_idx):
+        num_envs = envs_idx.shape[0]
         theta = torch.rand(num_envs) * 2 * torch.pi  # angle in [0, 2π)
         half_theta = theta / 2
+        
+        # Initialize quaternion array
         quat = torch.zeros((num_envs, 4))
-        quat[:, 2] = torch.sin(half_theta)  # z
-        quat[:, 3] = torch.cos(half_theta)  # w
+        
+        # Quaternion components for rotation around Z-axis
+        quat[:, 0] = torch.cos(half_theta)  # w = cos(θ/2)
+        quat[:, 1] = torch.sin(half_theta)  # x = sin(θ/2)
+        quat[:, 2] = 0                    # y = 0 (for XY-plane rotation)
+        quat[:, 3] = 0                    # z = 0 (for XY-plane rotation)
+        
         return quat
 
     # def _sample_TF_command(self,envs_idx,cond_index=None):
@@ -254,17 +305,33 @@ class APWEnv:
         # goto_mask = self.commands[envs_idx, 2] > 0.0
         # envs_with_goto = envs_idx[goto_mask]
         # if len(envs_with_goto) > 0:
-        last_goto_rewards=sum(self.last_episode_sums["goto"])/envs_idx.shape[0]
-        last_survival_rewards=sum(self.last_episode_sums["survival"])/envs_idx.shape[0]
+        # last_goto_rewards=sum(self.last_episode_sums["goto"])/envs_idx.shape[0]
+        # last_survival_rewards=sum(self.last_episode_sums["survival"])/envs_idx.shape[0]
         # print(self.last_episode_sums.keys())
         # exit(0)
         # print("last_goto_rw",last_goto_rewards)
         # print("last_survival_rw",last_survival_rewards)
-        base_pos=self.robot.get_pos(envs_idx)[:][0]
-        sample_scale=1.0+(sum(base_pos))/envs_idx.shape[0]
+        # print("max_bas_pos_buffer:",self.robot.get_pos(envs_idx)[:, 0].cpu().tolist())#.extend(self.robot.get_pos(envs_idx)[:][0].cpu().tolist()))
+        self.max_base_pos_buffer.extend(self.robot.get_pos(envs_idx)[:, 0].cpu().tolist())
+        self.max_base_pos_buffer.sort(reverse=True)
+        # print("max_pose_buffer",self.max_base_pos_buffer[:6])
+        self.running_max_base_pos=sum(self.max_base_pos_buffer[:6])/5
+        # print(self.max_base_pos)
+        sample_scale=1.0+self.running_max_base_pos
         self.commands[envs_idx, 4:7] = self._random_pos_near_base(envs_idx=envs_idx,scale=sample_scale)
         self.commands[envs_idx, 6]=self.reward_cfg["base_height_target"]
         self.commands[envs_idx, 7:11] = self._random_quat_z(envs_idx=envs_idx)
+        # T = np.eye(4)
+        # T[:3, :3]=quat_to_R(self.commands[envs_idx[0], 7:11].cpu())
+        # T[:3, 3] = [1,0,0]
+        # # print(T)
+        # point=np.ones((4,))
+        # point[:3]=self.commands[envs_idx[0], 4:7].cpu()
+        # second_point=point@T
+        # self.scene.clear_debug_objects()
+        # print(get_two_positions(self.commands[envs_idx[0], 4:7],self.commands[envs_idx[0], 7:11]))
+        # start,end=get_two_positions(self.commands[envs_idx[0], 4:7],self.commands[envs_idx[0], 7:11])
+        # self.scene.draw_debug_line(start, end,0.05)
 
 
     def _check_collisions(self, entity, env_indices, exclude_collision):
@@ -620,10 +687,29 @@ class APWEnv:
 
         return cost_per_env
 
+    # def _reward_survival(self):
+    #     reward = 1/(self.max_episode_length-self.episode_length_buf) 
+    #     # print("_reward_survival:", reward.shape)
+    #     return reward
+    # def _reward_survival(self):
+    #     # Normalize episode length to range [0, 1]
+    #     self.episode_length_buf+=1
+    #     normalized = self.episode_length_buf / self.max_episode_length
+        
+    #     # Scale to range [-high, +high] (e.g., from -10 to +10)
+    #     reward = (normalized * 2 - 1)  # Adjust multiplier (10) as needed for reward strength
+    #     print("episode_length_buf:", self.episode_length_buf, "\nreward:",reward)
+    #     return reward
     def _reward_survival(self):
-        reward = self.episode_length_buf / self.max_episode_length 
-        # print("_reward_survival:", reward.shape)
+        self.episode_length_buf += 1  # ensure not zero for division
+
+        normalized = self.episode_length_buf / self.max_episode_length  # range [0, 1]
+        
+        # Shift to range [-1, 1], then cube it for strong gradient
+        reward = ((2 * normalized) - 1) ** 3 
+
         return reward
+
         
     def _reward_home(self):
         reward= torch.zeros_like(self.all_envs_idx,dtype=gs.tc_float)
@@ -784,7 +870,7 @@ class APWEnv:
             # Combine errors
             reward = torch.exp(-2.0 * pos_error) * torch.exp(-1.0 * ang_error)
             # print("_reward_pos_alignment:", reward)
-            return reward
+            return torch.exp(-2.0 * pos_error)
         return reward    
 
     def _reward_high_joint_force(self):

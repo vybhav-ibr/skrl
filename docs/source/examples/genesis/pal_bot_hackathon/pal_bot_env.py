@@ -18,6 +18,7 @@ class BoxFactory:
     def __init__(self, scene, n_envs, n_boxes, conveyer_bounds_lower, conveyer_bounds_upper, pallet_volume):
         self.n_envs = n_envs
         self.n_boxes = n_boxes
+        self.scene=scene
         self.conveyer_bounds = np.array([conveyer_bounds_lower, conveyer_bounds_upper])  # shape (2, 3)
         self.pallet_volume = pallet_volume
 
@@ -72,9 +73,21 @@ class BoxFactory:
 
         chosen_box_indices = np.random.randint(0, self.n_boxes, size=len(envs_idx))
         positions = np.random.uniform(0, 1, size=(len(envs_idx), 3)) * ranges + bounds_min
+        positions[:, 2] = 1.0
+        if len(positions) > 0:
+            print(positions)
+            # exit(0)
+        else:
+            pass
+            # exit(0)
+            # fixed height above conveyer
+        # time.sleep(2.5)
+        print("appears",envs_idx)
         sizes = self.box_sizes[chosen_box_indices]
 
         for i, env_id in enumerate(envs_idx):
+
+            
             chosen_box_id = chosen_box_indices[i]
             pos = positions[i]
 
@@ -89,12 +102,16 @@ class BoxFactory:
                 self.active_sizes[env_id] = 0.0
 
             else:
+                # print("materualising object:",env_id,"with last box id",self.active_box_indices[env_id])
                 # Place new box
                 self.active_box_indices[env_id] = chosen_box_id
                 self.active_positions[env_id] = pos
                 self.active_sizes[env_id] = self.box_sizes[chosen_box_id]
-                self.entities[chosen_box_id].set_pos(pos[np.newaxis, :], envs_idx=np.array([env_id]))
+                pose_to_set=pos[np.newaxis, :]
+                # print("setting pos",pose_to_set,"for env",env_id)
+                self.entities[chosen_box_id].set_pos(pose_to_set, envs_idx=np.array([env_id]))
 
+        # exit(0)
         return torch.tensor(positions, dtype=gs.tc_float), torch.tensor(sizes, dtype=gs.tc_float)
         
     def suction_switch(self, suction_mask):
@@ -158,17 +175,46 @@ class BoxFactory:
             all_positions = self.entities[box_id].get_pos().cpu().numpy()  # shape (n_envs, 3)
             self.active_positions[env_id] = all_positions[env_id]
 
+    # def reset_pallet(self, envs_idx):
+    #     """
+    #     envs_idx: torch.BoolTensor of shape (n_envs,), where True means "reset this env"
+    #     """
+    #     envs_with_reset = torch.arange(self.n_envs)[~envs_idx]  # Extract env indices where mask is True
+
+    #     print(f"reset_pallet called for envs: {envs_idx.tolist()}")
+
+    #     for env_id in envs_with_reset:
+    #         env_id = env_id.item()
+    #         for box_id in range(self.n_boxes):
+    #             underground_pos = self._get_underground_pos(box_id)
+    #             self.entities[box_id].set_pos(underground_pos[np.newaxis, :], envs_idx=np.array([env_id]))
+
+    #         self.active_box_indices[env_id] = -1
+    #         self.active_positions[env_id] = 0.0
+    #         self.active_sizes[env_id] = 0.0
+    #         self.placed_box_sizes[env_id] = []
+    
     def reset_pallet(self, envs_idx):
-        for i in range(envs_idx.shape[0]):
-            env_id = envs_idx[i].item()
+        all_envs_idx = torch.arange(self.n_envs)
+        envs_with_reset = all_envs_idx[envs_idx]
+        
+        print(f"resetpallet_called for {envs_idx}")
+        
+        for reset_id in envs_with_reset:
+            env_id = envs_idx[reset_id].item()
+            
             for box_id in range(self.n_boxes):
                 underground_pos = self._get_underground_pos(box_id)
-                self.entities[box_id].set_pos(underground_pos[np.newaxis, :], envs_idx=np.array([env_id]))
-
+                self.entities[box_id].set_pos(
+                    underground_pos[np.newaxis, :], 
+                    envs_idx=np.array([env_id])
+                )
+            
             self.active_box_indices[env_id] = -1
             self.active_positions[env_id] = 0.0
             self.active_sizes[env_id] = 0.0
             self.placed_box_sizes[env_id] = []
+
 
     def record_placed_box(self, envs_idx):
         for env_id in envs_idx:
@@ -293,7 +339,7 @@ class PalletizeEnv(BoxFactory):
         self.top_cams = []
         for i in range(num_envs):
             cam = self.scene.add_camera(
-                res=self.cam_res, fov=90, GUI=False, env_idx=i
+                res=self.cam_res, fov=90, GUI=True, env_idx=i
             )  # per-env camera
             self.top_cams.append(cam)
 
@@ -511,8 +557,9 @@ class PalletizeEnv(BoxFactory):
         eef_pos, _ = self._eef_pose()
         target_pos = self.commands[:, 1:4]
         dist = torch.norm(eef_pos - target_pos, dim=-1)
-        rew = torch.exp(-self.reward_cfg.get("pick_pos_scale", 50.0) * dist)
-        return rew
+        # rew = torch.exp(-self.reward_cfg.get("pick_pos_scale", 50.0) * dist)
+        print("reward_pick:",dist)
+        return dist
 
     def _reward_goto_home(self):
         # Penalize deviation from home DOF pose
@@ -617,7 +664,8 @@ class PalletizeEnv(BoxFactory):
         # if full_mask.any():
         #     idx = torch.nonzero(full_mask, as_tuple=False).squeeze(-1)
         #     self.top_image[idx] = 0.0
-        self.box_factory.reset_pallet(change_pallet_cmd)
+        print("change_pallet_cmd",change_pallet_cmd)
+        # self.box_factory.reset_pallet(change_pallet_cmd)
 
         # Timeout-based resets
         self.reset_buf = (self.episode_length_buf > self.max_episode_length)
