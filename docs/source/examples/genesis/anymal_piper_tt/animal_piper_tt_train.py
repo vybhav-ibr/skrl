@@ -17,8 +17,7 @@ from rsl_rl.runners import OnPolicyRunner
 
 import genesis as gs
 
-from animal_piper_env import APWEnv
-
+from animal_piper_tt_env import APTTEnv
 
 def get_train_cfg(exp_name, max_iterations):
     train_cfg_dict = {
@@ -68,7 +67,7 @@ def get_train_cfg(exp_name, max_iterations):
 
 def get_cfgs():
     env_cfg = {
-        "num_actions": 20,
+        "num_actions": 18,
         # joint/link names
         "default_dof_properties": {  # [rad]
             "LF_HAA": [0.0, 100, 5.0],
@@ -90,10 +89,8 @@ def get_cfgs():
             "joint2": [0.87,80,5.0],
             "joint3": [-0.87,80,5.0],
             "joint4": [0.0,40,5.0],
-            "joint5": [0.0,10,1.5],
+            "joint5": [-1.57,10,1.5],
             "joint6": [0.0,10,1.5],
-            "joint7": [0.0,40.0,5],
-            "joint8": [0.0,40.0,5],
         },
         "arm_pick_pos": {
             "joint1": [0.0],
@@ -102,8 +99,6 @@ def get_cfgs():
             "joint4": [0.0],
             "joint5": [0.0],
             "joint6": [0.0],
-            "joint7": [0.0],
-            "joint8": [0.0],
         },
         "links_to_keep":["LF_FOOT","RF_FOOT","LH_FOOT","RH_FOOT",
                          "depth_camera_front_lower_camera","depth_camera_rear_lower_camera"],
@@ -126,55 +121,52 @@ def get_cfgs():
         "clip_actions": 100.0,
     }
     obs_cfg = {
-        "num_obs": 105,
+        "num_obs": 71,
         "obs_scales": {
             "lin_vel": 2.0,
             "ang_vel": 0.25,
             "dof_pos": 1.0,
             "dof_vel": 0.05,
-            
-            "eef_dof_pos":1.0,
-            "eef_dof_quat":1.0,
-            "grasp_status":1.0,
-            "basket_contact":1.0,
         },
     }
     reward_cfg = {
         "base_height_target": 0.45,
         "eef_pos_object_threshold":0.25,
         "reward_scales": {
-            # "reset":-10,
-            # "survival":5,
-            # "home":10.0,
-            # "pick_eef_pos_object":1.0,
-            # "pick_grasp_object":1.0,
-            # "place_ungrasp_object":1.0,
-            # "place_object_pos_basket":1.0,
-            "goto":2.5,
-            # "high_joint_force":-0.75,
-            # "action_rate":-0.0125,
+            # "undesirable_contact": -5.0,  # Negative scale for penalty
+            # "target_force_and_contact":10,
+            "survival":-0.0025,
+            "pos_alignment":-15,
+            # "high_joint_force":-0.005,
+            # "time_cost":10.0,
+            # "action_rate":-0.1,
             # "base_height":-10.0,
-            # "goal_proximity":0.375,
-            # "similar_to_default": -0.0125,
-            "arm_stability":-0.0125
         }
+        # "reward_scales": {
+        #     "tracking_lin_vel": 1.0,
+        #     "tracking_ang_vel": 0.2,
+        #     "lin_vel_z": -1.0,
+        #     "base_height": -50.0,
+        #     "action_rate": -0.005,
+        #     "similar_to_default": -0.1,
+        # },
     }
     command_cfg = {
-        "num_commands": 11,
-        "home":[True,False],
-        
-        "pick":[True,False],
-        # "deliver":[True,False],
-        
-        "goto":[True,False],
-        "goto_pos": [[0,5],[-0.125,0.125],[0.65,0.35]],
-        "goto_quat": [[-1,1],[-1,1],[-1,1],[-1,1]],
-        
-        "place":[True,False],
+        "num_commands": 7,
+        "eef_pos": [[-1.0,2.0],[-1.5,1.5],[0.75,1.5]],
+        # "eef_quat": [[-1,1],[-1,1],[-1,1],[-1,1]],
+        "force": [[0,1000],[0,1000],[0,1000]],
+        # "target_directions": ["will see if thi scan be used"],
+        "num_timesteps": [[0,100]],
+        # "command_scales": {
+        #     "lin_vel": 2.0,
+        #     "ang_vel": 0.25,
+        #     "dof_pos": 1.0,
+        #     "dof_vel": 0.05,
+        # },
     }
-
+    
     return env_cfg, obs_cfg, reward_cfg, command_cfg
-
 
 def main():
     parser = argparse.ArgumentParser()
@@ -199,7 +191,7 @@ def main():
         open(f"{log_dir}/cfgs.pkl", "wb"),
     )
 
-    env = APWEnv(
+    env = APTTEnv(
         num_envs=args.num_envs, env_cfg=env_cfg, obs_cfg=obs_cfg, reward_cfg=reward_cfg, command_cfg=command_cfg,show_viewer=args.vis
     )
 
@@ -215,3 +207,5 @@ if __name__ == "__main__":
 # training
 python examples/locomotion/go2_train.py
 """
+
+

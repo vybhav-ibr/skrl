@@ -56,7 +56,7 @@ def get_two_positions(pos, quat, distance=0.25):
     return start.detach().cpu().numpy(), end.detach().cpu().numpy()
 
 
-class APWEnv:
+class APTTEnv:
     def __init__(self, num_envs, env_cfg, obs_cfg, reward_cfg, command_cfg, show_viewer=False):
         self.num_envs = num_envs
         self.num_obs = obs_cfg["num_obs"]
@@ -107,14 +107,15 @@ class APWEnv:
         self.inv_base_init_quat = inv_quat(self.base_init_quat)
         self.robot = self.scene.add_entity(
             gs.morphs.URDF(
-                file="skrl/docs/source/examples/genesis/anymal_d/urdf/anymal_d.urdf",
+                file="skrl/docs/source/examples/genesis/assets/anymal_d/urdf/anymal_d_tt.urdf",
                 pos=self.base_init_pos.cpu().numpy(),
                 quat=self.base_init_quat.cpu().numpy(),
                 links_to_keep=self.env_cfg["links_to_keep"]
             ),
-            visualize_contact=False
+            visualize_contact=False,
+            # vis_mode="sdf"
         )
-        self.target_sphere=self.scene.add_entity(
+        self.ball=self.scene.add_entity(
             gs.morphs.Sphere(
                 radius=(0.02),
                 fixed=True,
@@ -132,7 +133,7 @@ class APWEnv:
 
         # names to indices
         self.dof_names=env_cfg["default_dof_properties"].keys()
-        self.arm_names=env_cfg["arm_pick_pos"].keys()
+        self.arm_names=[f'joint{k}' for k in range(1,7)]
         self.motors_dof_idx = [self.robot.get_joint(name).dof_start for name in self.dof_names]
         self.arm_dof_idx = [self.robot.get_joint(name).dof_start for name in self.arm_names]
 
@@ -199,9 +200,10 @@ class APWEnv:
         self.extras = dict()  # extra information for logging
         self.extras["observations"] = dict()
         
-        self.eef_link_idx=self.robot.get_link("Link6").idx_local
-        self.eef_link_name="Link6"
-        self.arm_links=[f"Link{k}" for k in range(1,9)]
+        self.eef_link_idx=self.robot.get_link("bat").idx_local
+        self.eef_link_name="bat"
+        self.arm_links=[f"Link{k}" for k in range(1,7)]
+        self.arm_links.append(self.eef_link_name)
         # for link in self.robot.links:
         #     print(link.name)
         # dummy_depth= torch.zeros((512, 512,1))
@@ -222,7 +224,7 @@ class APWEnv:
             "robot_base_quat":self.robot.get_quat()[0],
             "taken_actions":self.actions[0],  # 12
         }
-        self.obs_buf= torch.zeros((self.num_envs, 85), device=gs.device, dtype=gs.tc_float)
+        self.obs_buf= torch.zeros((self.num_envs, 75), device=gs.device, dtype=gs.tc_float)
         
         self.all_envs_idx=torch.arange(0,self.num_envs,dtype=gs.tc_int)
         self.eef_pos_object_threshold=reward_cfg["eef_pos_object_threshold"]
@@ -237,23 +239,7 @@ class APWEnv:
         
         self.max_base_pos_buffer=[0.0,0.0,0.0,0.0,0.0]
         self.running_max_base_pos=0.0
-        
-        # self.dummy_depth= torch.zeros((self.num_envs,512, 512,1))
-        # self.dummy_depth_small= torch.zeros((self.num_envs,128, 128,1))
-        # self.dummy_image= torch.zeros((self.num_envs,512, 512,3))
-        
-        # self.scene.draw_debug_line(start=(0,0,0),end=(0,0,0.55),radius=0.25)
-        # for _ in range(1000):
-        #     self.scene.step()
     
-    # def _random_quat_z(self,envs_idx):
-    #     num_envs=envs_idx.shape[0]
-    #     theta = torch.rand(num_envs) * 2 * torch.pi  # angle in [0, 2π)
-    #     half_theta = theta / 2
-    #     quat = torch.zeros((num_envs, 4))
-    #     quat[:, 2] = torch.sin(half_theta)  # z
-    #     quat[:, 3] = torch.cos(half_theta)  # w
-    #     return quat
     def _random_quat_z(self, envs_idx):
         num_envs = envs_idx.shape[0]
         theta = torch.rand(num_envs) * 2 * torch.pi  # angle in [0, 2π)
@@ -271,67 +257,58 @@ class APWEnv:
         return quat
 
     # def _sample_TF_command(self,envs_idx,cond_index=None):
-    def _random_pos_near_base(self, envs_idx, scale):
+    def _random_pos_near_base(self, envs_idx, scale=1.0):
         """
-        Samples new positions at a certain (scaled) distance from robot base positions.
+        Samples new end-effector positions near the robot base, within specified axis-aligned ranges.
 
         Args:
             envs_idx (torch.Tensor or list): Indices of envs to sample positions for.
-            scale (float): Scaling factor for sampling distance.
+            scale (float): Scaling factor for offset from base position.
+            x_range (tuple): (min_x, max_x) range relative to base position.
+            y_range (tuple): (min_y, max_y) range relative to base position.
+            z_range (tuple): (min_z, max_z) range relative to base position.
 
         Returns:
             torch.Tensor: Sampled positions of shape (k, 3)
         """
-        selected_poses = self.robot.get_pos(envs_idx=envs_idx)  # shape (k, 3)
-        k = selected_poses.shape[0]
+        base_pos = self.robot.get_pos(envs_idx=envs_idx)  # shape (k, 3)
+        k = base_pos.shape[0]
 
-        # Random unit vectors
-        random_dirs = torch.randn(k, 3)
-        random_dirs = random_dirs / torch.norm(random_dirs, dim=1, keepdim=True)
+        # Random offsets in range [-1, 1]
+        random_offsets = torch.rand(k, 3) * 2 - 1  # uniform in [-1, 1]
+        x_range,y_range,z_range=self.command_cfg["eef_pos"][0],self.command_cfg["eef_pos"][1],self.command_cfg["eef_pos"][2]
+        # Scale the random offsets based on the given axis ranges and global scale
+        ranges = torch.tensor([
+            [x_range[0], x_range[1]],
+            [y_range[0], y_range[1]],
+            [z_range[0], z_range[1]]
+        ], device=base_pos.device)
 
-        offset = random_dirs * 1.0 * scale
-        sampled_pos = selected_poses + offset
+        # Compute half-ranges (for symmetric scaling around 0)
+        half_ranges = (ranges[:, 1] - ranges[:, 0]) / 2.0  # (3,)
+        
+        # Apply scaling
+        scaled_offsets = random_offsets * half_ranges * scale  # (k, 3)
 
-        # Clamp the Y-coordinate (index 1) to [-0.5, 0.5]
-        sampled_pos[:, 1] = torch.clamp(sampled_pos[:, 1], min=-0.5, max=0.5)
+        # Sampled position = base position + offset
+        sampled_pos = base_pos + scaled_offsets
+
+        # Clamp final position within [base + min_range, base + max_range]
+        min_bounds = base_pos + ranges[:, 0]
+        max_bounds = base_pos + ranges[:, 1]
+
+        sampled_pos = torch.max(sampled_pos, min_bounds)
+        sampled_pos = torch.min(sampled_pos, max_bounds)
 
         return sampled_pos
 
-
     def _resample_commands(self, envs_idx):
 
-        self.commands[envs_idx, 2] = 1.0
-
-        # goto_mask = self.commands[envs_idx, 2] > 0.0
-        # envs_with_goto = envs_idx[goto_mask]
-        # if len(envs_with_goto) > 0:
-        # last_goto_rewards=sum(self.last_episode_sums["goto"])/envs_idx.shape[0]
-        # last_survival_rewards=sum(self.last_episode_sums["survival"])/envs_idx.shape[0]
-        # print(self.last_episode_sums.keys())
-        # exit(0)
-        # print("last_goto_rw",last_goto_rewards)
-        # print("last_survival_rw",last_survival_rewards)
-        # print("max_bas_pos_buffer:",self.robot.get_pos(envs_idx)[:, 0].cpu().tolist())#.extend(self.robot.get_pos(envs_idx)[:][0].cpu().tolist()))
-        self.max_base_pos_buffer.extend(self.robot.get_pos(envs_idx)[:, 0].cpu().tolist())
-        self.max_base_pos_buffer.sort(reverse=True)
-        # print("max_pose_buffer",self.max_base_pos_buffer[:6])
-        self.running_max_base_pos=sum(self.max_base_pos_buffer[:6])/5
-        # print(self.max_base_pos)
-        sample_scale=2.0
-        self.commands[envs_idx, 4:7] = self._random_pos_near_base(envs_idx=envs_idx,scale=sample_scale)
-        self.commands[envs_idx, 6]=self.reward_cfg["base_height_target"]
-        self.commands[envs_idx, 7:11] = self._random_quat_z(envs_idx=envs_idx)
-        # T = np.eye(4)
-        # T[:3, :3]=quat_to_R(self.commands[envs_idx[0], 7:11].cpu())
-        # T[:3, 3] = [1,0,0]
-        # # print(T)
-        # point=np.ones((4,))
-        # point[:3]=self.commands[envs_idx[0], 4:7].cpu()
-        # second_point=point@T
-        # self.scene.clear_debug_objects()
-        # print(get_two_positions(self.commands[envs_idx[0], 4:7],self.commands[envs_idx[0], 7:11]))
-        # start,end=get_two_positions(self.commands[envs_idx[0], 4:7],self.commands[envs_idx[0], 7:11])
-        # self.scene.draw_debug_line(start, end,0.05)
+        sample_scale=0.5
+        self.commands[envs_idx, 0:3] = self._random_pos_near_base(envs_idx=envs_idx,scale=sample_scale)
+        # print(torch.max(self.commands[envs_idx, 2]))
+        # self.ball.set_pos(self.commands[envs_idx, 0:3],envs_idx=envs_idx)
+        self.commands[envs_idx,3]=10.0
 
 
     def _check_collisions(self, entity, env_indices, exclude_collision):
@@ -408,6 +385,32 @@ class APWEnv:
                 valid_envs.append(True)
 
         return torch.tensor(valid_envs, dtype=torch.bool)
+    
+    def print_reset_causes(self,envs_idx):
+        timeout_reset = self.episode_length_buf > self.max_episode_length
+        roll_reset = torch.abs(self.base_euler[:, 1]) > self.env_cfg["termination_criteria_roll"]
+        pitch_reset = torch.abs(self.base_euler[:, 0]) > self.env_cfg["termination_criteria_pitch"]
+        height_reset = self.robot.get_pos()[:, 2] < self.env_cfg["termination_criteria_base_height"]
+
+        # Combine them for actual reset
+        self.reset_buf = timeout_reset | roll_reset | pitch_reset | height_reset
+
+        # Print reasons for each env (if you have many envs, limit output)
+        for i in range(self.reset_buf.shape[0]):
+            if self.reset_buf[i]:
+                reasons = []
+                if timeout_reset[i]: reasons.append("timeout")
+                if roll_reset[i]: reasons.append("roll")
+                if pitch_reset[i]: reasons.append("pitch")
+                if height_reset[i]: reasons.append("height")
+                # print(f"Env {i} reset due to: {', '.join(reasons)}")
+
+        # Count how many resets per cause
+        print("Reset counts:")
+        print(f"  Timeout: {timeout_reset.sum().item()}")
+        print(f"  Roll:    {roll_reset.sum().item()}")
+        print(f"  Pitch:   {pitch_reset.sum().item()}")
+        print(f"  Height:  {height_reset.sum().item()}")
 
         
     def step(self, actions):
@@ -505,24 +508,6 @@ class APWEnv:
         self.last_dof_vel[:] = self.dof_vel[:]
         self.last_commands[:] = self.commands[:]
         self.last_episode_sums = self.episode_sums
-        # self.last_rewards[:] = self.rew_buf[:]
-        # self.extras["observations"]["critic"] = self.obs_buf
-        # Print the shapes of the tensors before the view operation
-
-        # print("back_depth_stacked shape before view:", torch.tensor(back_depth_stacked).shape)
-        # print("front_depth_stacked shape before view:", torch.tensor(front_depth_stacked).shape)
-        # print("gripper_depth_stacked shape before view:", torch.tensor(gripper_depth_stacked).shape)
-        # print("gripper_img_stacked shape before view:", torch.tensor(gripper_img_stacked).shape)
-
-        # print("commands shape:", self.commands.shape)
-        # print("dof_pos shape:", self.dof_pos.shape)
-        # print("dof_vel shape:", self.dof_vel.shape)
-        # print("obj_pos shape:", self.obj_pos.shape)
-        # print("obj_quat shape:", self.obj_quat.shape)
-        # print("robot_pos shape:", self.robot.get_pos().shape)
-        # print("robot_quat shape:", self.robot.get_quat().shape)
-        # print("actions shape:", self.actions.shape)
-        # exit(0)
 
         # print("obs_buf_shape at step",self.obs_buf.shape)
         # print(self.obs_buf)
@@ -591,13 +576,14 @@ class APWEnv:
             self.episode_sums[key][envs_idx] = 0.0
 
         self._resample_commands(envs_idx)
-        self.target_sphere.set_pos(self.commands[envs_idx, 4:7],envs_idx=envs_idx)
+        # print(f"resampled for {envs_idx.detach().cpu().tolist()}")
+        self.ball.set_pos(self.commands[envs_idx, 0:3],envs_idx=envs_idx)
         # for it,env_id in enumerate(envs_idx.cpu().tolist()):
-        #     if self.target_sphere[env_id] is not None:
-        #         self.scene.clear_debug_object(self.target_sphere[env_id])
+        #     if self.ball[env_id] is not None:
+        #         self.scene.clear_debug_object(self.ball[env_id])
         #     offset=self.make_env_offset(env_id)
         #     target_pos=self.commands[envs_idx[it], 4:7][0]-offset
-        #     self.target_sphere[env_id]=self.scene.draw_debug_sphere(pos=target_pos,radius=0.075)
+        #     self.ball[env_id]=self.scene.draw_debug_sphere(pos=target_pos,radius=0.075)
         
     def reset(self):
         self.reset_buf[:] = True
@@ -687,255 +673,102 @@ class APWEnv:
 
         return cost_per_env
 
-    # def _reward_survival(self):
-    #     reward = 1/(self.max_episode_length-self.episode_length_buf) 
-    #     # print("_reward_survival:", reward.shape)
-    #     return reward
-    # def _reward_survival(self):
-    #     # Normalize episode length to range [0, 1]
-    #     self.episode_length_buf+=1
-    #     normalized = self.episode_length_buf / self.max_episode_length
-        
-    #     # Scale to range [-high, +high] (e.g., from -10 to +10)
-    #     reward = (normalized * 2 - 1)  # Adjust multiplier (10) as needed for reward strength
-    #     print("episode_length_buf:", self.episode_length_buf, "\nreward:",reward)
-    #     return reward
-    
-    def _reward_reset(self):
-        reward= torch.zeros_like(self.all_envs_idx,dtype=gs.tc_float)
-        reset_idx=self.episode_length_buf==0
-        reward[reset_idx]=1
-        # print("reset_idx",reset_idx)
-        # print("reset_reward",reward)
-        return reward
-        
     def _reward_survival(self):
-        self.episode_length_buf += 1  # ensure not zero for division
+        reward = torch.square(self.max_episode_length/(self.episode_length_buf+1))
+        # print("_reward_survival:", reward.shape)
+        return reward
 
-        normalized = self.episode_length_buf / self.max_episode_length  # range [0, 1]
+    def _reward_pos_alignment(self):
+        eef_pos = self.robot.get_links_pos(self.eef_link_idx).squeeze(1) 
+        eef_quat = self.robot.get_links_quat(self.eef_link_idx).squeeze(1) 
+
+        target_pos = self.commands[:, 0:3]
+        target_quat = self.commands[:, 3:7]
         
-        # Shift to range [-1, 1], then cube it for strong gradient
-        reward = ((2 * normalized) - 1) ** 3 
+        # print("eef_pos:", eef_pos.shape)
+        # print("target_pos:", target_pos.shape)
+        # print("eef_quat:", eef_quat.shape)
+        # print("target_quat:", target_quat.shape)
 
-        return reward
+        # Position error (L2 norm)
+        pos_error = torch.norm(eef_pos - target_pos, dim=-1)
 
-        
-    def _reward_home(self):
-        reward= torch.zeros_like(self.all_envs_idx,dtype=gs.tc_float)
-        pick_mask = self.commands[:, 1] > 0.0  # Boolean tensor, same length as envs_idx
-        envs_with_pick = self.all_envs_idx[pick_mask]
-        robot_dofs_position=self.robot.get_dofs_position(self.motors_dof_idx)
-        # print("dof_diff",robot_dofs_position-self.default_dof_pos)
-        # print("dof_diff_norm",torch.norm(robot_dofs_position-self.default_dof_pos, dim=1))
-        if len(envs_with_pick) > 0:
-            robot_dofs_position=self.robot.get_dofs_position(self.motors_dof_idx)
-            reward[envs_with_pick]=torch.norm(robot_dofs_position-self.default_dof_pos)
-            return reward
-        return reward
-    
-    def _reward_similar_to_default(self):
-        reward= torch.zeros_like(self.all_envs_idx,dtype=gs.tc_float)
-        robot_dofs_position=self.robot.get_dofs_position(self.motors_dof_idx)
-        reward=torch.norm(robot_dofs_position-self.default_dof_pos)
-        return reward
-    
-    def _reward_arm_stability(self):
-        reward= torch.zeros_like(self.all_envs_idx,dtype=gs.tc_float)
-        robot_dofs_position=self.robot.get_dofs_position(self.arm_dof_idx)
-        reward=torch.norm(robot_dofs_position[11:]-self.arm_pick_pos)
-        return reward
-        
-    
-    def _reward_pick_eef_pos_object(self):
-        reward= torch.zeros_like(self.all_envs_idx,dtype=gs.tc_float)
-        pick_mask = self.commands[:, 1] > 0.0  # Boolean tensor, same length as envs_idx
-        envs_with_pick = self.all_envs_idx[pick_mask]
-        # print("envs_idx_shape",envs_with_pick)
-        if len(envs_with_pick) > 0:
-            eef_pos = self.robot.get_links_pos(self.eef_link_idx).squeeze(1) 
-            eef_quat = self.robot.get_links_quat(self.eef_link_idx).squeeze(1) 
+        # Orientation error: compute angular distance from quaternions
+        dot_product = torch.sum(eef_quat * target_quat, dim=-1).clamp(-1.0, 1.0)
+        ang_error = 2 * torch.acos(torch.abs(dot_product))
 
-            target_pos = self.obj_pos
-            target_quat = self.obj_quat
-
-            # Position error (L2 norm)
-            pos_error = torch.norm(eef_pos - target_pos, dim=1)
-
-            # Orientation error: compute angular distance from quaternions
-            dot_product = torch.sum(eef_quat * target_quat, dim=1).clamp(-1.0, 1.0)
-            ang_error = 2 * torch.acos(torch.abs(dot_product))
-            # print("pos_error",pos_error.shape)
-            # print("ang_error",ang_error.shape)
-            # Combine errors
-            reward[envs_with_pick]= torch.exp(-2.0 * pos_error)[envs_with_pick] * torch.exp(-1.0 * ang_error)[envs_with_pick]
-            return reward
-        return reward
-        
-    def _reward_pick_grasp_object(self):
-        reward= torch.zeros_like(self.all_envs_idx,dtype=gs.tc_float)
-        pick_mask = self.commands[:, 2] > 0.0  # Boolean tensor, same length as envs_idx
-        envs_with_pick = self.all_envs_idx[pick_mask]
-        if len(envs_with_pick) > 0:
-            robot_dofs_position=self.robot.get_dofs_position(self.arm_dof_idx)
-            default_dofs_position=self.arm_pick_pos
-            target_pick_pose_reward= torch.norm(robot_dofs_position-default_dofs_position, dim=-1)
-            
-            desired_collision_objects=[self.left_gripper,self.right_gripper]
-            undesired_collision_objects=[collision_object for collision_object in self.all_scene_objects if collision_object not in desired_collision_objects]
-            object_contacts_reward=self._get_contact_reward(self.all_scene_objects,self.chosen_object,desired_collision_objects,undesired_collision_objects)
-
-            reward[envs_with_pick]= target_pick_pose_reward[envs_with_pick] * torch.exp(-1.0 * object_contacts_reward)[envs_with_pick]
-            return reward
-        return reward
-        
-    #check reward validity
-    def _reward_place_ungrasp_object(self):
-        reward= torch.zeros_like(self.all_envs_idx,dtype=gs.tc_float)
-        place_mask = self.commands[:, 2] > 0.0  # Boolean tensor, same length as envs_idx
-        envs_with_place = self.all_envs_idx[place_mask]
-        if len(envs_with_place) > 0:
-            robot_dofs_position=self.robot.get_dofs_position(self.arm_dof_idx)
-            default_dofs_position=self.arm_pick_pos
-            target_pick_pose_reward= torch.norm(robot_dofs_position-default_dofs_position, dim=-1)
-            
-            undesired_collision_objects=[self.left_gripper,self.right_gripper]
-            # undesired_collision_objects=[collision_object for collision_object in self.all_scene_objects if collision_object not in desired_collision_objects]
-            object_contacts_reward=self._get_contact_reward(self.all_scene_objects,self.chosen_object,None,undesired_collision_objects)
-
-            # Combine errors
-            reward[envs_with_place]= target_pick_pose_reward[envs_with_place] * torch.exp(-1.0 * object_contacts_reward[envs_with_place])
-            return reward
-        return reward
-            
-    def _reward_place_object_pos_basket(self):
-        reward= torch.zeros_like(self.all_envs_idx,dtype=gs.tc_float)
-        goto_mask = self.commands[:, 3] > 0.0  # Boolean tensor, same length as envs_idx
-        envs_with_goto = self.all_envs_idx[goto_mask]
-        if len(envs_with_goto) > 0:
-            obj_pos = self.obj_pos
-
-            target_pos = self.basket_pos
-
-            # Position error (L2 norm)
-            pos_error = torch.norm(obj_pos - target_pos, dim=-1)
-            desired_collision_objects=[self.basket]
-            undesired_collision_objects=[collision_object for collision_object in self.all_scene_objects if collision_object not in desired_collision_objects]
-            obj_contact_reward=self._get_contact_reward(self.all_scene_objects,self.chosen_object,desired_collision_objects,undesired_collision_objects)
-            # Combine errors
-            combined_error= torch.exp(-2.0 * pos_error) * torch.exp(obj_contact_reward)
-            combined_error[self._reward_pick_eef_pos_object()<self.eef_pos_object_threshold]=0.0
-            
-            reward[envs_with_goto]= combined_error[envs_with_goto]
-            return reward
+        # Combine errors
+        reward = torch.exp(-2.0 * pos_error) * torch.exp(-1.0 * ang_error)
+        # print("_reward_pos_alignment:", reward.shape)
         return reward
     
-    def unused_rewards(self):
-        pass
-        def _reward_deliver_eef_pos_object(self):
-            if self.commands[:,2]==True:
-                eef_pos = self.robot.get_links_pos(self.eef_link_idx).squeeze(1) 
-                eef_quat = self.robot.get_links_quat(self.eef_link_idx).squeeze(1) 
+    def _reward_undesirable_contact(self):
+        ground_contacts = self.robot.get_contacts(with_entity=self.ground)
+        forces = torch.zeros((self.num_envs,), device=gs.device)
 
-                target_pos = self.obj_pos
-                target_quat = self.obj_quat
+        if ground_contacts["valid_mask"].any():
+            for env_idx in range(self.num_envs):
+                contact_links = ground_contacts["link_a"][env_idx]       # [num_contacts]
+                contact_forces = ground_contacts["force_a"][env_idx]     # [num_contacts, 3]
+                valid_mask = ground_contacts["valid_mask"][env_idx]      # [num_contacts]
 
-                # Position error (L2 norm)
-                pos_error = torch.norm(eef_pos - target_pos, dim=-1)
+                for contact_idx in range(contact_links.shape[0]):
+                    if not valid_mask[contact_idx]:
+                        continue  # Skip invalid contacts
 
-                # Orientation error: compute angular distance from quaternions
-                dot_product = torch.sum(eef_quat * target_quat, dim=-1).clamp(-1.0, 1.0)
-                ang_error = 2 * torch.acos(torch.abs(dot_product))
+                    link_idx = contact_links[contact_idx].item()
+                    link_name = self.scene.rigid_solver.links[link_idx].name
 
-                # Combine errors
-                return torch.exp(-2.0 * pos_error) * torch.exp(-1.0 * ang_error)
-            
-        def _reward_deliver_object_pos_basket(self):
-            if self.commands[:,1]==True:
-                
-                obj_pos = self.obj_pos
+                    if link_name in self.arm_links:
+                        # Use norm of the contact force vector
+                        force_vec = contact_forces[contact_idx]
+                        force_magnitude = torch.norm(force_vec)
+                        forces[env_idx] += force_magnitude
 
-                target_pos = self.basket_pos
+        return forces
 
-                # Position error (L2 norm)
-                pos_error = torch.norm(obj_pos - target_pos, dim=-1)
-                obj_contact=self._get_contact(self.obj)
-                # Combine errors
-                combined_error= torch.exp(-2.0 * pos_error) * torch.exp(obj_contact)
-                combined_error[self._reward_pick_eef_pos_object<self.eef_pos_object_threshold]=0.0
-                
-                return combined_error
-        
-    # def _reward_goto(self):
-    #     reward= torch.zeros_like(self.all_envs_idx,dtype=gs.tc_float)
-    #     goto_mask = self.commands[:, 2] > 0.0  # Boolean tensor, same length as envs_idx
-    #     envs_with_goto = self.all_envs_idx[goto_mask]
-    #     if len(envs_with_goto) > 0:
-    #         base_pos = self.robot.get_pos().squeeze(1) 
-    #         base_quat = self.robot.get_quat().squeeze(1) 
+    def _reward_target_force_and_contact(self):
+        ball_contacts = self.robot.get_contacts(with_entity=self.ball)
+        forces = torch.zeros((self.num_envs,), device=gs.device)
 
-    #         target_pos = self.commands[:, 0:3]
-    #         target_quat = self.commands[:, 3:7]
+        if ball_contacts["valid_mask"].any():
+            for env_idx in range(self.num_envs):
+                contact_links = ball_contacts["link_a"][env_idx]       # [num_contacts]
+                contact_forces = ball_contacts["force_a"][env_idx]     # [num_contacts, 3]
+                valid_mask = ball_contacts["valid_mask"][env_idx]      # [num_contacts]
 
-    #         # Position error (L2 norm)
-    #         pos_error = torch.norm(base_pos - target_pos, dim=-1)
+                for contact_idx in range(contact_links.shape[0]):
+                    if not valid_mask[contact_idx]:
+                        continue  # Skip invalid contacts
 
-    #         # Orientation error: compute angular distance from quaternions
-    #         dot_product = torch.sum(base_quat * target_quat, dim=-1).clamp(-1.0, 1.0)
-    #         ang_error = 2 * torch.acos(torch.abs(dot_product))
+                    link_idx = contact_links[contact_idx].item()
+                    link_name = self.scene.rigid_solver.links[link_idx].name
 
-    #         # Combine errors
-    #         reward = torch.exp(-2.0 * pos_error) * torch.exp(-1.0 * ang_error)
-    #         # print("_reward_pos_alignment:", reward)
-    #         return torch.exp(-2.0 * pos_error)
-    #     return reward    
-    
-    def _reward_goto(self):
-        # Initialize reward as zeros for all environments
-        reward = torch.zeros_like(self.all_envs_idx, dtype=gs.tc_float)
-        
-        # Mask for environments with a 'goto' command
-        goto_mask = self.commands[:, 2] > 0.0
-        envs_with_goto = self.all_envs_idx[goto_mask]
-        
-        if len(envs_with_goto) > 0:
-            # Get robot base positions
-            base_pos = self.robot.get_pos().squeeze(1)  # Shape: [num_envs, 3]
-            
-            # Get target positions from command
-            target_pos = self.commands[:, 0:3]          # Shape: [num_envs, 3]
-            
-            # Compute L2 distance (Euclidean) to goal for all environments
-            robot_to_goal_dist = torch.norm(base_pos - target_pos, dim=-1)  # Shape: [num_envs]
+                    if link_name in self.eef_link_name:
+                        force_vec = contact_forces[contact_idx]
+                        force_magnitude = torch.norm(force_vec)
+                        forces[env_idx] += force_magnitude
 
-            # Compute reward: higher when closer to target
-            reaching_reward = 1.0 - torch.tanh(robot_to_goal_dist)
-
-            # Apply reward only to environments with active 'goto' command
-            reward[goto_mask] = reaching_reward[goto_mask]
-        
-        return reward
+        return forces
 
     def _reward_high_joint_force(self):
-        joint_forces = self.robot.get_dofs_force(self.motors_dof_idx)
-        joint_kp= self.robot.get_dofs_kp(self.motors_dof_idx)
-        reward = torch.abs(torch.sum(joint_forces/joint_kp, dim=1))
-        # print("_reward_high_joint_force:", reward)
+        joint_torques = self.robot.get_dofs_force(self.motors_dof_idx)
+        reward = torch.sum(torch.square(joint_torques), dim=1)
+        # print("_reward_high_joint_force:", reward.shape)
         return reward
 
+    def _reward_time_cost(self):
+        pos_alignment = self._reward_pos_alignment()
+        time_scaled_reward = pos_alignment * self.episode_length_buf
+        # print("_reward_time_cost:", time_scaled_reward.shape)
+        return time_scaled_reward
+
     def _reward_action_rate(self):
-        # print(self.last_actions[:,:-8].shape)
-        reward = torch.sum(torch.square(self.last_actions[:,:-8] - self.actions[:,:-8]), dim=1)
+        reward = torch.sum(torch.square(self.last_actions - self.actions), dim=1)
         # print("_reward_action_rate:", reward.shape)
         return reward
 
     def _reward_base_height(self):
         reward = (self.base_pos[:, 2] - self.reward_cfg["base_height_target"])
         # print("_reward_base_height:", reward)
-        return torch.abs(reward)
-
-    def _reward_goal_proximity(self):
-        target_pos = self.commands[:, 0:3]
-        base_pos = self.robot.get_pos().squeeze(1)
-        dist = torch.norm(base_pos - target_pos, dim=-1)
-        reward = 1.0 / (dist + 1e-3)  # avoid divide-by-zero
         return reward

@@ -17,7 +17,7 @@ from rsl_rl.runners import OnPolicyRunner
 
 import genesis as gs
 
-from animal_piper_env import APWEnv
+from ackerman_env import AKEnv
 
 
 def get_train_cfg(exp_name, max_iterations):
@@ -68,62 +68,43 @@ def get_train_cfg(exp_name, max_iterations):
 
 def get_cfgs():
     env_cfg = {
-        "num_actions": 20,
+        "num_actions": 6,
         # joint/link names
         "default_dof_properties": {  # [rad]
-            "LF_HAA": [0.0, 100, 5.0],
-            "RF_HAA": [0.0, 100, 5.0],
-            "LH_HAA": [0.0, 100, 5.0],
-            "RH_HAA": [0.0, 100, 5.0],
-
-            "LF_HFE": [0.4, 100, 5.0],
-            "RF_HFE": [0.4, 100, 5.0],
-            "LH_HFE": [-0.4, 100, 5.0],
-            "RH_HFE": [-0.4, 100, 5.0],
-
-            "LF_KFE": [-0.75, 100, 5.0],
-            "RF_KFE": [-0.75, 100, 5.0],
-            "LH_KFE": [0.75, 100, 5.0],
-            "RH_KFE": [0.75, 100, 5.0],
-
-            "joint1": [0.0,80,5.0],
-            "joint2": [0.87,80,5.0],
-            "joint3": [-0.87,80,5.0],
-            "joint4": [0.0,40,5.0],
-            "joint5": [0.0,10,1.5],
-            "joint6": [0.0,10,1.5],
-            "joint7": [0.0,40.0,5],
-            "joint8": [0.0,40.0,5],
+            # rear_left_wheel_joint
+            # rear_right_wheel_joint
+            # left_wheel_steering_joint
+            # right_wheel_steering_joint
+            # front_left_wheel_joint
+            # front_right_wheel_joint
+            "rear_left_wheel_joint": [0.0,100.0,10.0],
+            "rear_right_wheel_joint": [0.0,100.0,10.0],
+            "left_wheel_steering_joint": [0.0,100.0,10.0],
+            "right_wheel_steering_joint": [0.0,100.0,10.0],
+            "front_left_wheel_joint": [0.0,100.0,10.0],
+            "front_right_wheel_joint": [0.0,100.0,10.0],
         },
-        "arm_pick_pos": {
-            "joint1": [0.0],
-            "joint2": [0.87],
-            "joint3": [-0.87],
-            "joint4": [0.0],
-            "joint5": [0.0],
-            "joint6": [0.0],
-            "joint7": [0.0],
-            "joint8": [0.0],
-        },
-        "links_to_keep":["LF_FOOT","RF_FOOT","LH_FOOT","RH_FOOT",
-                         "depth_camera_front_lower_camera","depth_camera_rear_lower_camera"],
+        "links_to_keep":["camera_link"],
         # termination
-        "termination_criteria_roll": 45,  # degree
-        "termination_criteria_pitch": 45,
-        "termination_criteria_base_height": 0.45,
-        "contact_exclusion_pairs": #link,entity
-            [["LH_FOOT","plane"],
-             ["RH_FOOT","plane"],
-             ["LF_FOOT","plane"],
-             ["RH_FOOT","plane"]],
+        # "termination_criteria_roll": 25,  # degree
+        # "termination_criteria_pitch": 25,
+        # "termination_criteria_base_height": 0.45,
+        # "contact_exclusion_pairs": #link,entity
+        #     [["LH_FOOT","plane"],
+        #      ["RH_FOOT","plane"],
+        #      ["LF_FOOT","plane"],
+        #      ["RH_FOOT","plane"]],
         # base pose
-        "base_init_pos": [0.0, 0.0, 0.67],
+        "base_init_pos": [0.0, 0.0, 0.0],
         "base_init_quat": [1.0, 0.0, 0.0, 0.0],
-        "episode_length_s": 25.0,
-        "resampling_time_s": 4.0,
-        "action_scale": 0.25,
+        "episode_length_s": 125.0,
+        # "resampling_time_s": 4.0,
+        # "action_scale": 0.25,
+        "action_scale_pos": 0.125,
+        "action_scale_vel": 0.125,
         "simulate_action_latency": True,
-        "clip_actions": 100.0,
+        "clip_actions_position": 3.14,
+        "clip_actions_velocity": 10.0,
     }
     obs_cfg = {
         "num_obs": 105,
@@ -140,8 +121,8 @@ def get_cfgs():
         },
     }
     reward_cfg = {
-        "base_height_target": 0.45,
-        "eef_pos_object_threshold":0.25,
+        # "base_height_target": 0.45,
+        # "eef_pos_object_threshold":0.25,
         "reward_scales": {
             # "reset":-10,
             # "survival":5,
@@ -156,7 +137,7 @@ def get_cfgs():
             # "base_height":-10.0,
             # "goal_proximity":0.375,
             # "similar_to_default": -0.0125,
-            "arm_stability":-0.0125
+            # "arm_stability":-0.0125
         }
     }
     command_cfg = {
@@ -199,7 +180,7 @@ def main():
         open(f"{log_dir}/cfgs.pkl", "wb"),
     )
 
-    env = APWEnv(
+    env = AKEnv(
         num_envs=args.num_envs, env_cfg=env_cfg, obs_cfg=obs_cfg, reward_cfg=reward_cfg, command_cfg=command_cfg,show_viewer=args.vis
     )
 

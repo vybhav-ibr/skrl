@@ -17,7 +17,7 @@ from rsl_rl.runners import OnPolicyRunner
 
 import genesis as gs
 
-from animal_piper_env import APWEnv
+from go2_env_p import Go2Env
 
 
 def get_train_cfg(exp_name, max_iterations):
@@ -68,109 +68,79 @@ def get_train_cfg(exp_name, max_iterations):
 
 def get_cfgs():
     env_cfg = {
-        "num_actions": 20,
+        "num_actions": 12,
         # joint/link names
-        "default_dof_properties": {  # [rad]
-            "LF_HAA": [0.0, 100, 5.0],
-            "RF_HAA": [0.0, 100, 5.0],
-            "LH_HAA": [0.0, 100, 5.0],
-            "RH_HAA": [0.0, 100, 5.0],
-
-            "LF_HFE": [0.4, 100, 5.0],
-            "RF_HFE": [0.4, 100, 5.0],
-            "LH_HFE": [-0.4, 100, 5.0],
-            "RH_HFE": [-0.4, 100, 5.0],
-
-            "LF_KFE": [-0.75, 100, 5.0],
-            "RF_KFE": [-0.75, 100, 5.0],
-            "LH_KFE": [0.75, 100, 5.0],
-            "RH_KFE": [0.75, 100, 5.0],
-
-            "joint1": [0.0,80,5.0],
-            "joint2": [0.87,80,5.0],
-            "joint3": [-0.87,80,5.0],
-            "joint4": [0.0,40,5.0],
-            "joint5": [0.0,10,1.5],
-            "joint6": [0.0,10,1.5],
-            "joint7": [0.0,40.0,5],
-            "joint8": [0.0,40.0,5],
+        "default_joint_angles": {  # [rad]
+            "FL_hip_joint": 0.0,
+            "FR_hip_joint": 0.0,
+            "RL_hip_joint": 0.0,
+            "RR_hip_joint": 0.0,
+            "FL_thigh_joint": 0.8,
+            "FR_thigh_joint": 0.8,
+            "RL_thigh_joint": 1.0,
+            "RR_thigh_joint": 1.0,
+            "FL_calf_joint": -1.5,
+            "FR_calf_joint": -1.5,
+            "RL_calf_joint": -1.5,
+            "RR_calf_joint": -1.5,
         },
-        "arm_pick_pos": {
-            "joint1": [0.0],
-            "joint2": [0.87],
-            "joint3": [-0.87],
-            "joint4": [0.0],
-            "joint5": [0.0],
-            "joint6": [0.0],
-            "joint7": [0.0],
-            "joint8": [0.0],
-        },
-        "links_to_keep":["LF_FOOT","RF_FOOT","LH_FOOT","RH_FOOT",
-                         "depth_camera_front_lower_camera","depth_camera_rear_lower_camera"],
+        "joint_names": [
+            "FR_hip_joint",
+            "FR_thigh_joint",
+            "FR_calf_joint",
+            "FL_hip_joint",
+            "FL_thigh_joint",
+            "FL_calf_joint",
+            "RR_hip_joint",
+            "RR_thigh_joint",
+            "RR_calf_joint",
+            "RL_hip_joint",
+            "RL_thigh_joint",
+            "RL_calf_joint",
+        ],
+        # PD
+        "kp": 20.0,
+        "kd": 0.5,
         # termination
-        "termination_criteria_roll": 45,  # degree
-        "termination_criteria_pitch": 45,
-        "termination_criteria_base_height": 0.45,
-        "contact_exclusion_pairs": #link,entity
-            [["LH_FOOT","plane"],
-             ["RH_FOOT","plane"],
-             ["LF_FOOT","plane"],
-             ["RH_FOOT","plane"]],
+        "termination_if_roll_greater_than": 10,  # degree
+        "termination_if_pitch_greater_than": 10,
         # base pose
-        "base_init_pos": [0.0, 0.0, 0.67],
+        "base_init_pos": [0.0, 0.0, 0.42],
         "base_init_quat": [1.0, 0.0, 0.0, 0.0],
-        "episode_length_s": 25.0,
+        "episode_length_s": 20.0,
         "resampling_time_s": 4.0,
         "action_scale": 0.25,
         "simulate_action_latency": True,
         "clip_actions": 100.0,
     }
     obs_cfg = {
-        "num_obs": 105,
+        "num_obs": 45,
         "obs_scales": {
             "lin_vel": 2.0,
             "ang_vel": 0.25,
             "dof_pos": 1.0,
             "dof_vel": 0.05,
-            
-            "eef_dof_pos":1.0,
-            "eef_dof_quat":1.0,
-            "grasp_status":1.0,
-            "basket_contact":1.0,
         },
     }
     reward_cfg = {
-        "base_height_target": 0.45,
-        "eef_pos_object_threshold":0.25,
+        "tracking_sigma": 0.25,
+        "base_height_target": 0.3,
+        "feet_height_target": 0.075,
         "reward_scales": {
-            # "reset":-10,
-            # "survival":5,
-            # "home":10.0,
-            # "pick_eef_pos_object":1.0,
-            # "pick_grasp_object":1.0,
-            # "place_ungrasp_object":1.0,
-            # "place_object_pos_basket":1.0,
-            "goto":2.5,
-            # "high_joint_force":-0.75,
-            # "action_rate":-0.0125,
-            # "base_height":-10.0,
-            # "goal_proximity":0.375,
-            # "similar_to_default": -0.0125,
-            "arm_stability":-0.0125
-        }
+            # "tracking_pos":1.0,
+            "tracking_lin_vel": 1.0,
+            "tracking_ang_vel": 0.2,
+            "lin_vel_z": -1.0,
+            "base_height": -50.0,
+            "action_rate": -0.005,
+            "similar_to_default": -0.1,
+        },
     }
     command_cfg = {
-        "num_commands": 11,
-        "home":[True,False],
-        
-        "pick":[True,False],
-        # "deliver":[True,False],
-        
-        "goto":[True,False],
-        "goto_pos": [[0,5],[-0.125,0.125],[0.65,0.35]],
-        "goto_quat": [[-1,1],[-1,1],[-1,1],[-1,1]],
-        
-        "place":[True,False],
+        "num_commands": 3,
+        "lin_vel_x_range": [-1.5, 1.5],
+        "lin_vel_y_range": [0, 0],
+        "ang_vel_range": [0, 0],
     }
 
     return env_cfg, obs_cfg, reward_cfg, command_cfg
@@ -178,8 +148,8 @@ def get_cfgs():
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("-e", "--exp_name", type=str, default="animal-rsl-rl-walking")
-    parser.add_argument("-B", "--num_envs", type=int, default=5)
+    parser.add_argument("-e", "--exp_name", type=str, default="go2-walking")
+    parser.add_argument("-B", "--num_envs", type=int, default=1024)
     parser.add_argument("--max_iterations", type=int, default=10000)
     parser.add_argument("-v", "--vis", action="store_true", default=False)
     args = parser.parse_args()
@@ -199,7 +169,7 @@ def main():
         open(f"{log_dir}/cfgs.pkl", "wb"),
     )
 
-    env = APWEnv(
+    env = Go2Env(
         num_envs=args.num_envs, env_cfg=env_cfg, obs_cfg=obs_cfg, reward_cfg=reward_cfg, command_cfg=command_cfg,show_viewer=args.vis
     )
 

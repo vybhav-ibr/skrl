@@ -56,7 +56,7 @@ def get_two_positions(pos, quat, distance=0.25):
     return start.detach().cpu().numpy(), end.detach().cpu().numpy()
 
 
-class APWEnv:
+class AKEnv:
     def __init__(self, num_envs, env_cfg, obs_cfg, reward_cfg, command_cfg, show_viewer=False):
         self.num_envs = num_envs
         self.num_obs = obs_cfg["num_obs"]
@@ -87,7 +87,8 @@ class APWEnv:
                 camera_fov=40,
             ),
             vis_options=gs.options.VisOptions(
-                rendered_envs_idx=list(range(self.num_envs//2,self.num_envs//2+4))),
+                # rendered_envs_idx=list(range(self.num_envs//2,self.num_envs//2+4)),
+                show_link_frame=True,),
             rigid_options=gs.options.RigidOptions(
                 dt=self.dt,
                 constraint_solver=gs.constraint_solver.Newton,
@@ -107,34 +108,42 @@ class APWEnv:
         self.inv_base_init_quat = inv_quat(self.base_init_quat)
         self.robot = self.scene.add_entity(
             gs.morphs.URDF(
-                file="skrl/docs/source/examples/genesis/anymal_d/urdf/anymal_d.urdf",
+                file="/home/vybhav/gs_gym_wrapper_reference/ackerman.urdf",
                 pos=self.base_init_pos.cpu().numpy(),
                 quat=self.base_init_quat.cpu().numpy(),
                 links_to_keep=self.env_cfg["links_to_keep"]
             ),
-            visualize_contact=False
+            visualize_contact=True
         )
         self.target_sphere=self.scene.add_entity(
             gs.morphs.Sphere(
-                radius=(0.02),
+                radius=(0.075),
                 fixed=True,
                 collision=False ,
             ),
             # material=gs.materials.Rigid(gravity_compensation=1),
             surface=gs.surfaces.Rough(
                 diffuse_texture=gs.textures.ColorTexture(
-                    color=(225/255, 165/225, 0.0),
+                    color=(225/255, 0.0, 0.0),
                 ),
             ),
         )
         # build
-        self.scene.build(n_envs=num_envs,env_spacing=(2,2), n_envs_per_row=num_envs)
+        self.scene.build(n_envs=num_envs)#,env_spacing=(2,2), n_envs_per_row=num_envs)
 
         # names to indices
         self.dof_names=env_cfg["default_dof_properties"].keys()
-        self.arm_names=env_cfg["arm_pick_pos"].keys()
+        # self.left_arm_names=env_cfg["link_names"]["left"]["arm"]
+        # self.right_arm_names=env_cfg["link_names"]["right"]["arm"]
+        # self.left_hand_names=env_cfg["link_names"]["left"]["hand"]
+        # self.right_hand_names=env_cfg["link_names"]["right"]["hand"]
         self.motors_dof_idx = [self.robot.get_joint(name).dof_start for name in self.dof_names]
-        self.arm_dof_idx = [self.robot.get_joint(name).dof_start for name in self.arm_names]
+        
+        # self.left_arm_dof_idx = [self.robot.get_joint(name).dof_start for name in self.left_arm_names]
+        # self.right_arm_dof_idx = [self.robot.get_joint(name).dof_start for name in self.right_arm_names]
+        
+        # self.left_hand_dof_idx = [self.robot.get_joint(name).dof_start for name in self.left_hand_names]
+        # self.right_hand_dof_idx = [self.robot.get_joint(name).dof_start for name in self.right_hand_names]
 
         # PD control parameters
         for dof_name,dof_properties in env_cfg["default_dof_properties"].items():
@@ -191,46 +200,48 @@ class APWEnv:
         self.base_pos = torch.zeros((self.num_envs, 3), device=gs.device, dtype=gs.tc_float)
         self.base_quat = torch.zeros((self.num_envs, 4), device=gs.device, dtype=gs.tc_float)
         
-        self.arm_pick_pos=torch.tensor(
-            [self.env_cfg["arm_pick_pos"][name][0] for name in self.arm_names],
-            device=gs.device,
-            dtype=gs.tc_float,
-        )
+        # self.arm_pick_pos=torch.tensor(
+        #     [self.env_cfg["arm_pick_pos"][name][0] for name in self.arm_names],
+        #     device=gs.device,
+        #     dtype=gs.tc_float,
+        # )
         self.extras = dict()  # extra information for logging
         self.extras["observations"] = dict()
         
-        self.eef_link_idx=self.robot.get_link("Link6").idx_local
-        self.eef_link_name="Link6"
-        self.arm_links=[f"Link{k}" for k in range(1,9)]
+        # self.left_eef_link_idx=self.robot.get_link("L_hand_base").idx_local
+        # self.right_eef_link_idx=self.robot.get_link("R_hand_base").idx_local
+        # self.right_eef_link_name="R_hand_base"
+        # self.left_eef_link_name="L_hand_base"
+        # self.arm_links=[f"Link{k}" for k in range(1,9)]
         # for link in self.robot.links:
         #     print(link.name)
-        # dummy_depth= torch.zeros((512, 512,1))
+        dummy_depth= torch.zeros((512, 512,1))
         # dummy_depth_small= torch.zeros((128, 128,1))
         # dummy_image= torch.zeros((512, 512,3))
         self.obs_space = {
             # "ang_vel":self.base_ang_vel[0] * self.obs_scales["ang_vel"],  # 3
             # "back_depth":dummy_depth_small,
-            "commands":self.commands[0] ,  # 3
-            "dof_diff":(self.dof_pos[0] - self.default_dof_pos[0]) * self.obs_scales["dof_pos"],  # 12
-            "dof_vel":self.dof_vel[0] * self.obs_scales["dof_vel"],  # 12
-            # "front_depth":dummy_depth_small,
+            # "commands":self.commands[0] ,  # 3
+            "dof_pos":self.dof_pos[0],  # 12
+            "dof_vel":self.dof_pos[0],  # 12
+            "front_depth":dummy_depth,
             # "gripper_depth":dummy_depth,
             # "gripper_img":dummy_image,
-            "object_pos":self.obj_pos[0],
-            "object_quat":self.obj_quat[0],
-            "robot_base_pos":self.robot.get_pos()[0],
-            "robot_base_quat":self.robot.get_quat()[0],
+            # "object_pos":self.obj_pos[0],
+            # "object_quat":self.obj_quat[0],
+            # "robot_base_pos":self.robot.get_pos()[0],
+            # "robot_base_quat":self.robot.get_quat()[0],
             "taken_actions":self.actions[0],  # 12
         }
-        self.obs_buf= torch.zeros((self.num_envs, 85), device=gs.device, dtype=gs.tc_float)
+        self.obs_buf= torch.zeros((self.num_envs, 262162), device=gs.device, dtype=gs.tc_float)
         
         self.all_envs_idx=torch.arange(0,self.num_envs,dtype=gs.tc_int)
-        self.eef_pos_object_threshold=reward_cfg["eef_pos_object_threshold"]
+        # self.eef_pos_object_threshold=reward_cfg["eef_pos_object_threshold"]
         # print("obs_buf_shape at init",self.obs_buf.shape)
         
         
-        self.left_gripper = next((link for link in self.robot.links if link.name == "Link7"), None)
-        self.right_gripper = next((link for link in self.robot.links if link.name == "Link8"), None)
+        # self.left_gripper = next((link for link in self.robot.links if link.name == "Link7"), None)
+        # self.right_gripper = next((link for link in self.robot.links if link.name == "Link8"), None)
         # # Assuming you have these variables:
         self.scene_entities={"robot":self.robot,
                              "plane":self.plane}
@@ -238,7 +249,7 @@ class APWEnv:
         self.max_base_pos_buffer=[0.0,0.0,0.0,0.0,0.0]
         self.running_max_base_pos=0.0
         
-        # self.dummy_depth= torch.zeros((self.num_envs,512, 512,1))
+        self.dummy_depth= torch.zeros((self.num_envs,512, 512,1))
         # self.dummy_depth_small= torch.zeros((self.num_envs,128, 128,1))
         # self.dummy_image= torch.zeros((self.num_envs,512, 512,3))
         
@@ -317,9 +328,9 @@ class APWEnv:
         # print("max_pose_buffer",self.max_base_pos_buffer[:6])
         self.running_max_base_pos=sum(self.max_base_pos_buffer[:6])/5
         # print(self.max_base_pos)
-        sample_scale=2.0
+        sample_scale=5.0
         self.commands[envs_idx, 4:7] = self._random_pos_near_base(envs_idx=envs_idx,scale=sample_scale)
-        self.commands[envs_idx, 6]=self.reward_cfg["base_height_target"]
+        self.commands[envs_idx, 6]=0.0
         self.commands[envs_idx, 7:11] = self._random_quat_z(envs_idx=envs_idx)
         # T = np.eye(4)
         # T[:3, :3]=quat_to_R(self.commands[envs_idx[0], 7:11].cpu())
@@ -369,7 +380,7 @@ class APWEnv:
             all_contacts_allowed = True
             for contact_idx in range(valid_mask.shape[1]):
                 if not valid_mask[env_idx, contact_idx]:
-                    print(f"continueing:{env_idx}")
+                    # print(f"continueing:{env_idx}")
                     continue
 
                 link_a = links[link_a_ids[env_idx, contact_idx]]
@@ -415,10 +426,18 @@ class APWEnv:
         # self._update_obj_pos()
         # self._update_basket_pos()
         # print(self.robot.get_dofs_kp())
+        # print(actions.max(dim=1)[0])
         self.actions = torch.clip(actions, -self.env_cfg["clip_actions"], self.env_cfg["clip_actions"])
-        exec_actions = self.last_actions if self.simulate_action_latency else self.actions
-        target_dof_pos = exec_actions * self.env_cfg["action_scale"] + self.default_dof_pos
-        self.robot.control_dofs_position(target_dof_pos, self.motors_dof_idx)
+        exec_actions = self.last_actions if self.simulate_action_latency else actions
+        target_dof_vel_front = exec_actions[:,:2] * self.env_cfg["action_scale_vel"]
+        target_dof_vel_back = exec_actions[:,-2:] * self.env_cfg["action_scale_vel"]
+        # print(target_dof_pos[:,:2], self.motors_dof_idx[:2])
+        target_dof_pos_front = exec_actions[:,2:-2] * self.env_cfg["action_scale_pos"]
+        # print(list(self.dof_names)[:2],list(self.dof_names)[2:-2],list(self.dof_names)[-2:])
+        print(target_dof_vel_front[0],target_dof_vel_back[0])
+        self.robot.set_dofs_velocity(target_dof_vel_front, self.motors_dof_idx[:2])
+        self.robot.set_dofs_position(target_dof_pos_front, self.motors_dof_idx[2:-2])
+        self.robot.set_dofs_velocity(target_dof_vel_back, self.motors_dof_idx[-2:])
         self.scene.step()
 
         # update buffers
@@ -448,9 +467,9 @@ class APWEnv:
         # check termination and reset
         self.reset_buf = self.episode_length_buf > self.max_episode_length
         # print("timed_out",self.reset_buf)
-        self.reset_buf |= torch.abs(self.base_euler[:, 1]) > self.env_cfg["termination_criteria_roll"]
-        self.reset_buf |= torch.abs(self.base_euler[:, 0]) > self.env_cfg["termination_criteria_pitch"]
-        self.reset_buf |= torch.abs(self.robot.get_pos()[:, 2]) < self.env_cfg["termination_criteria_base_height"]
+        # self.reset_buf |= torch.abs(self.base_euler[:, 1]) > self.env_cfg["termination_criteria_roll"]
+        # self.reset_buf |= torch.abs(self.base_euler[:, 0]) > self.env_cfg["termination_criteria_pitch"]
+        # self.reset_buf |= torch.abs(self.robot.get_pos()[:, 2]) < self.env_cfg["termination_criteria_base_height"]
         # self.reset_buf |= torch.abs(self._check_collisions(self.robot,np.arange(0,self.num_envs),self.env_cfg["contact_exclusion_pairs"]))
         
         time_out_idx = (self.episode_length_buf > self.max_episode_length).nonzero(as_tuple=False).reshape((-1,))
@@ -486,16 +505,16 @@ class APWEnv:
         self.obs_buf = torch.cat(
             [
                 # self.dummy_depth_small.view(self.num_envs, -1),
-                self.commands, # 3
-                (self.dof_pos - self.default_dof_pos) * self.obs_scales["dof_pos"],  # 12
+                # self.commands, # 3
+                self.dof_pos ,
                 self.dof_vel * self.obs_scales["dof_vel"],  # 12
-                # self.dummy_depth_small.view(self.num_envs, -1),
+                self.dummy_depth.view(self.num_envs, -1),
                 # self.dummy_depth.view(self.num_envs, -1),
                 # self.dummy_image.view(self.num_envs, -1),
-                self.obj_pos,
-                self.obj_quat,
-                self.robot.get_pos(),
-                self.robot.get_quat(),
+                # self.obj_pos,
+                # self.obj_quat,
+                # self.robot.get_pos(),
+                # self.robot.get_quat(),
                 self.actions,  # 12
             ],
             axis=-1,
@@ -731,6 +750,7 @@ class APWEnv:
             robot_dofs_position=self.robot.get_dofs_position(self.motors_dof_idx)
             reward[envs_with_pick]=torch.norm(robot_dofs_position-self.default_dof_pos)
             return reward
+        # print("reward_goto:", reward)
         return reward
     
     def _reward_similar_to_default(self):
@@ -912,7 +932,7 @@ class APWEnv:
 
             # Apply reward only to environments with active 'goto' command
             reward[goto_mask] = reaching_reward[goto_mask]
-        
+        print("_reward_goto:", reward)
         return reward
 
     def _reward_high_joint_force(self):
