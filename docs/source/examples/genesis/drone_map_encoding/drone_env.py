@@ -58,7 +58,7 @@ class HoverEnv:
         )
 
         # add plane
-        self.scene.add_entity(gs.morphs.Plane())
+        self.scene.add_entity(gs.morphs.Plane(collision=False))
 
         # add target
         if self.env_cfg["visualize_target"]:
@@ -101,11 +101,11 @@ class HoverEnv:
             min_range=0.1,
             max_range=2.5,
             return_world_frame=False,
-            draw_debug=False,
+            draw_debug=True,
         )
 
         self.lidar = self.scene.add_sensor(gs.sensors.DepthCamera(pattern=gs.sensors.DepthCameraPattern(
-            res=(64,64)), **sensor_kwargs))
+            res=(16,16)), **sensor_kwargs))  # Reduced from (64,64) to save memory
         # build scene
         self.scene.build(n_envs=num_envs)
 
@@ -138,7 +138,7 @@ class HoverEnv:
             "base_lin_vel":self.base_lin_vel[0],
             "base_quat":self.base_quat[0],
             "base_rel_pos":self.base_pos[0],
-            "front_depth":torch.zeros((64, 64,3)),
+            "front_depth":torch.zeros((16, 16, 3)),  # Updated to 16x16
             "taken_actions":self.actions[0],  # 12
         }
         self.extras = dict()  # extra information for logging

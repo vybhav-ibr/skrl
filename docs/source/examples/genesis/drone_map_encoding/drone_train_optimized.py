@@ -80,6 +80,7 @@ parser.add_argument("-e", "--exp_name", type=str, default="drone-goto")
 parser.add_argument("-B", "--num_envs", type=int, default=5)
 parser.add_argument("--vis",action="store_true")
 parser.add_argument("--max_iterations", type=int, default=50000)
+parser.add_argument("--low_vram", action="store_true", help="Use low VRAM configuration")
 args = parser.parse_args()
 
 gs.init(logging_level="info",precision="32")
@@ -99,7 +100,7 @@ class Shared(GaussianMixin, DeterministicMixin, Model):
                  clip_actions=False, clip_log_std=True,
                  min_log_std=-20, max_log_std=2, reduction="sum",
                  map_shape=(16, 16, 3), proprio_dim=13,  # Updated to 16x16
-                 map_feat_dim=32, attn_heads=4):
+                 map_feat_dim=32, attn_heads=4, low_vram=False):
 
         Model.__init__(self,observation_space, action_space, device)
 
@@ -107,15 +108,26 @@ class Shared(GaussianMixin, DeterministicMixin, Model):
         GaussianMixin.__init__(self, clip_actions, clip_log_std, min_log_std, max_log_std, reduction)
         DeterministicMixin.__init__(self, clip_actions)
 
+        # Adjust sizes for low VRAM mode
+        if low_vram:
+            map_feat_dim = max(16, map_feat_dim // 2)
+            attn_heads = max(2, attn_heads // 2)
+            cnn_channels = [8, 16]
+            mlp_sizes = [128, 64, 32]
+        else:
+            cnn_channels = [16, 32]
+            mlp_sizes = [256, 128, 64]
+
         self.L, self.W, self.C = map_shape
         self.map_feat_dim = map_feat_dim
         self.flat_mlp_input_dim = map_feat_dim + proprio_dim
+        self.low_vram = low_vram
 
         # ------------------- CNN Encoder for Map -------------------
         self.cnn = nn.Sequential(
-            nn.Conv2d(self.C, 16, kernel_size=3, padding=1), nn.ELU(),
-            nn.Conv2d(16, 32, kernel_size=3, padding=1), nn.ELU(),
-            nn.Conv2d(32, map_feat_dim, kernel_size=3, padding=1), nn.ELU()
+            nn.Conv2d(self.C, cnn_channels[0], kernel_size=3, padding=1), nn.ELU(),
+            nn.Conv2d(cnn_channels[0], cnn_channels[1], kernel_size=3, padding=1), nn.ELU(),
+            nn.Conv2d(cnn_channels[1], map_feat_dim, kernel_size=3, padding=1), nn.ELU()
         )
 
         # Separate height extraction layer
@@ -129,24 +141,23 @@ class Shared(GaussianMixin, DeterministicMixin, Model):
         self.attn = nn.MultiheadAttention(embed_dim=map_feat_dim, num_heads=attn_heads, batch_first=True)
 
         # ------------------- MLP Trunk -------------------
-        self.mlp = nn.Sequential(
-            nn.Linear(self.flat_mlp_input_dim, 256), nn.ELU(),
-            nn.Linear(256, 128), nn.ELU(),
-            nn.Linear(128, 64), nn.ELU()
-        )
+        layers = []
+        in_dim = self.flat_mlp_input_dim
+        for out_dim in mlp_sizes:
+            layers.extend([nn.Linear(in_dim, out_dim), nn.ELU()])
+            in_dim = out_dim
+        self.mlp = nn.Sequential(*layers)
 
         # ------------------- Output Heads -------------------
-        self.mean_layer = nn.Linear(64, self.num_actions)
+        self.mean_layer = nn.Linear(mlp_sizes[-1], self.num_actions)
         self.log_std_parameter = nn.Parameter(torch.ones(self.num_actions))
-        self.value_layer = nn.Linear(64, 1)
+        self.value_layer = nn.Linear(mlp_sizes[-1], 1)
 
         self._shared_output = None  # Cache for shared encoder
 
-    def forward_cnn(self, map_scans):
+    def _forward_cnn_impl(self, map_scans):
         """
-        Encode map scans using CNN and height.
-        Input: (B, L, W, C)
-        Output: (B, L*W, map_feat_dim + 1)
+        Internal CNN implementation for gradient checkpointing.
         """
         B = map_scans.shape[0]
         x = map_scans.permute(0, 3, 1, 2)  # (B, C, L, W)
@@ -157,6 +168,20 @@ class Shared(GaussianMixin, DeterministicMixin, Model):
         combined = torch.cat([cnn_feats, height], dim=1)  # (B, map_feat_dim + 1, L, W)
         flat_feats = combined.view(B, combined.shape[1], -1).permute(0, 2, 1)  # (B, L*W, map_feat_dim + 1)
         return flat_feats
+
+    def forward_cnn(self, map_scans):
+        """
+        Encode map scans using CNN and height.
+        Uses gradient checkpointing in low VRAM mode.
+        Input: (B, L, W, C)
+        Output: (B, L*W, map_feat_dim + 1)
+        """
+        if self.low_vram and self.training:
+            # Use gradient checkpointing to trade compute for memory
+            from torch.utils.checkpoint import checkpoint
+            return checkpoint(self._forward_cnn_impl, map_scans, use_reentrant=False)
+        else:
+            return self._forward_cnn_impl(map_scans)
 
     def compute(self, inputs, role):
         """
@@ -171,18 +196,11 @@ class Shared(GaussianMixin, DeterministicMixin, Model):
         # ------------------- Extract Observations -------------------
         map_scans = space["front_depth"]  # (B, L, W, C)
 
-        # "base_ang_vel":self.base_ang_vel[0],
-        # "base_lin_vel":self.base_lin_vel[0],
-        # "base_quat":self.base_quat[0],
-        # "base_rel_pos":self.base_pos[0],
-        # "front_depth":dummy_depth,
-        # "taken_actions":self.actions[0],  # 12
         proprio = torch.cat([
             space["base_ang_vel"],    # (B, 3)
             space["base_lin_vel"],    # (B, 3)
             space["base_quat"],       # (B, 4)
             space["base_rel_pos"],        # (B, 3)
-            # space["take_actions"]
         ], dim=-1)  # → (B, proprio_dim)
 
         # ------------------- Encode Map -------------------
@@ -196,24 +214,24 @@ class Shared(GaussianMixin, DeterministicMixin, Model):
         # Query = proprio (context vector)
         # Key, Value = map (spatial features)
         # Set need_weights=False to prevent allocation of attention weights entirely
-        # The learnable attention parameters WILL still train via backprop.
         attn_out, _ = self.attn(
             query=proprio_encoded.unsqueeze(1),  # (B, 1, d)
             key=map_encoded,                     # (B, L*W, d)
             value=map_encoded,                   # (B, L*W, d)
-            need_weights=False  # ✅ Don't allocate attention weights at all
+            need_weights=False  # ✅ Don't allocate attention weights
         )
         attn_out = attn_out.squeeze(1)  # (B, d)
 
         # ------------------- MLP Trunk -------------------
         # Concatenate proprioception and attended map encoding
         mlp_input = torch.cat([attn_out, proprio], dim=-1)  # (B, map_feat_dim + proprio_dim)
-        shared_out = self.mlp(mlp_input)  # (B, 64)
+        shared_out = self.mlp(mlp_input)  # (B, final_mlp_size)
 
         # ------------------- Heads -------------------
         if role == "policy":
-            # Detach to prevent gradient accumulation in cache
-            self._shared_output = shared_out.detach()  # cache for value
+            # Use no_grad for cache to ensure no gradient tracking
+            with torch.no_grad():
+                self._shared_output = shared_out.clone()
             return self.mean_layer(shared_out), self.log_std_parameter, {}
 
         elif role == "value":
@@ -228,7 +246,7 @@ class Shared(GaussianMixin, DeterministicMixin, Model):
             return DeterministicMixin.act(self, inputs, role)  
 
 memory = MyRandomMemory(
-    memory_size=128,  # Reduced from 1000 to save VRAM (~67KB per env)
+    memory_size=16,  # Reduced from 1000 to save VRAM (~67KB per env)
     num_envs=env.num_envs,
     obs_space=env.observation_space,
     exclude_keys=["front_depth"],
@@ -239,7 +257,7 @@ memory = MyRandomMemory(
 # PPO requires 2 models, visit its documentation for more details
 # https://skrl.readthedocs.io/en/latest/api/agents/ppo.html#models
 models = {}
-models["policy"] = Shared(env.observation_space, env.action_space, device)
+models["policy"] = Shared(env.observation_space, env.action_space, device, low_vram=args.low_vram)
 models["value"] = models["policy"]  # same instance: shared model
 
 
@@ -247,8 +265,8 @@ models["value"] = models["policy"]  # same instance: shared model
 # https://skrl.readthedocs.io/en/latest/api/agents/ppo.html#configuration-and-hyperparameters
 cfg = PPO_DEFAULT_CONFIG.copy()
 cfg["rollouts"] = 8  # memory_size
-cfg["learning_epochs"] = 5
-cfg["mini_batches"] = 4  # 24 * 4096 / 24576
+cfg["learning_epochs"] = 3 if args.low_vram else 5  # Reduced for low VRAM
+cfg["mini_batches"] = 8 if args.low_vram else 4  # Increased for low VRAM
 cfg["discount_factor"] = 0.99
 cfg["lambda"] = 0.95
 cfg["learning_rate"] = 1e-3
@@ -256,7 +274,7 @@ cfg["learning_rate_scheduler"] = KLAdaptiveLR
 cfg["learning_rate_scheduler_kwargs"] = {"kl_threshold": 0.01}
 cfg["random_timesteps"] = 0
 cfg["learning_starts"] = 0
-cfg["grad_norm_clip"] = 1.0
+cfg["grad_norm_clip"] = 0.5 if args.low_vram else 1.0  # Reduced for stability
 cfg["ratio_clip"] = 0.2
 cfg["value_clip"] = 0.2
 cfg["clip_predicted_values"] = True
@@ -286,6 +304,16 @@ agent = PPO(models=models,
 # configure and instantiate the RL trainer
 cfg_trainer = {"timesteps": args.max_iterations, "headless": False}
 trainer = SequentialTrainer(cfg=cfg_trainer, env=env, agents=agent)
+
+# Print memory stats before training
+if torch.cuda.is_available():
+    print(f"\n{'='*60}")
+    print(f"VRAM Usage Before Training:")
+    print(f"  Allocated: {torch.cuda.memory_allocated() / 1e9:.3f} GB")
+    print(f"  Reserved:  {torch.cuda.memory_reserved() / 1e9:.3f} GB")
+    print(f"  Low VRAM Mode: {args.low_vram}")
+    print(f"  Num Envs: {args.num_envs}")
+    print(f"{'='*60}\n")
 
 # # start training
 trainer.train()
