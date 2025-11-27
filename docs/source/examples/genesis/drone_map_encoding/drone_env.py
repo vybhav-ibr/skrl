@@ -101,7 +101,7 @@ class HoverEnv:
             min_range=0.1,
             max_range=2.5,
             return_world_frame=False,
-            draw_debug=True,
+            draw_debug=False,
         )
 
         self.lidar = self.scene.add_sensor(gs.sensors.DepthCamera(pattern=gs.sensors.DepthCameraPattern(
@@ -131,19 +131,19 @@ class HoverEnv:
         self.base_lin_vel = torch.zeros((self.num_envs, 3), device=gs.device, dtype=gs.tc_float)
         self.base_ang_vel = torch.zeros((self.num_envs, 3), device=gs.device, dtype=gs.tc_float)
         self.last_base_pos = torch.zeros_like(self.base_pos)
-        dummy_depth= torch.zeros((64, 64,3))
+        
         
         self.obs_space = {
             "base_ang_vel":self.base_ang_vel[0],
             "base_lin_vel":self.base_lin_vel[0],
             "base_quat":self.base_quat[0],
             "base_rel_pos":self.base_pos[0],
-            "front_depth":dummy_depth,
+            "front_depth":torch.zeros((64, 64,3)),
             "taken_actions":self.actions[0],  # 12
         }
         self.extras = dict()  # extra information for logging
         self.extras["observations"] = dict()
-        self.dummy_depth= torch.zeros((self.num_envs,64, 64,3))
+        # self.dummy_depth= torch.zeros((self.num_envs,64, 64,3))
         
     def get_dummy_observations(self):
         # for key,value in self.obs_buf.items():
@@ -221,7 +221,7 @@ class HoverEnv:
         for name, reward_func in self.reward_functions.items():
             rew = reward_func() * self.reward_scales[name]
             self.rew_buf += rew
-            self.episode_sums[name] += rew
+            self.episode_sums[name] += rew.detach()  # Detach to prevent gradient accumulation
 
         # compute observations
         # print("pcd shape:",self.lidar.read()[0].shape)
@@ -233,7 +233,7 @@ class HoverEnv:
                 torch.clip(self.base_lin_vel * self.obs_scales["lin_vel"], -1, 1),
                 self.base_quat,
                 torch.clip(self.rel_pos * self.obs_scales["rel_pos"], -1, 1),
-                self.lidar.read()[0].view(self.num_envs, -1),
+                self.lidar.read()[0].view(self.num_envs, -1).detach(),  # Detach sensor data to prevent gradient accumulation
                 self.last_actions,
             ],
             axis=-1,

@@ -195,10 +195,13 @@ class Shared(GaussianMixin, DeterministicMixin, Model):
         # ------------------- Multi-Head Attention -------------------
         # Query = proprio (context vector)
         # Key, Value = map (spatial features)
+        # Set need_weights=False to prevent allocation of attention weights entirely
+        # The learnable attention parameters WILL still train via backprop.
         attn_out, _ = self.attn(
             query=proprio_encoded.unsqueeze(1),  # (B, 1, d)
             key=map_encoded,                     # (B, L*W, d)
-            value=map_encoded                    # (B, L*W, d)
+            value=map_encoded,                   # (B, L*W, d)
+            need_weights=False  # ✅ Don't allocate attention weights at all
         )
         attn_out = attn_out.squeeze(1)  # (B, d)
 
@@ -209,7 +212,8 @@ class Shared(GaussianMixin, DeterministicMixin, Model):
 
         # ------------------- Heads -------------------
         if role == "policy":
-            self._shared_output = shared_out  # cache for value
+            # Detach to prevent gradient accumulation in cache
+            self._shared_output = shared_out.detach()  # cache for value
             return self.mean_layer(shared_out), self.log_std_parameter, {}
 
         elif role == "value":
@@ -224,7 +228,7 @@ class Shared(GaussianMixin, DeterministicMixin, Model):
             return DeterministicMixin.act(self, inputs, role)  
 
 memory = MyRandomMemory(
-    memory_size=1000,
+    memory_size=128,  # Reduced from 1000 to save VRAM (~67KB per env)
     num_envs=env.num_envs,
     obs_space=env.observation_space,
     exclude_keys=["front_depth"],
