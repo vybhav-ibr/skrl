@@ -49,7 +49,7 @@ def get_cfgs():
         "max_visualize_FPS": 60,
     }
     obs_cfg = {
-        "num_obs": 785,  # Updated: 16*16*3 (768) + 17 other obs
+        "num_obs": 791,  # Updated: 16*16*3 (768) + 17 (old) + 6 (new) = 791
         "obs_scales": {
             "rel_pos": 1 / 3.0,
             "lin_vel": 1 / 3.0,
@@ -99,7 +99,7 @@ class Shared(GaussianMixin, DeterministicMixin, Model):
     def __init__(self, observation_space, action_space, device,
                  clip_actions=False, clip_log_std=True,
                  min_log_std=-20, max_log_std=2, reduction="sum",
-                 map_shape=(16, 16, 3), proprio_dim=13,  # Updated to 16x16
+                 map_shape=(16, 16, 3), proprio_dim=19,  # Updated to 19 (13 + 6)
                  map_feat_dim=32, attn_heads=4, low_vram=False):
 
         Model.__init__(self,observation_space, action_space, device)
@@ -201,6 +201,8 @@ class Shared(GaussianMixin, DeterministicMixin, Model):
             space["base_lin_vel"],    # (B, 3)
             space["base_quat"],       # (B, 4)
             space["base_rel_pos"],        # (B, 3)
+            space["base_rel_pos_1"],      # (B, 3)
+            space["base_rel_pos_2"],      # (B, 3)
         ], dim=-1)  # → (B, proprio_dim)
 
         # ------------------- Encode Map -------------------

@@ -1,3 +1,4 @@
+import random
 import torch
 import math
 import copy
@@ -14,7 +15,31 @@ import numpy as np
 def gs_rand_float(lower, upper, shape, device):
     return (upper - lower) * torch.rand(size=shape, device=device) + lower
 
+def sample_positions_and_orientations(grid_size, num_samples):
+    def random_z_rotation():
+        """Generate a random z-axis rotation (roll) between 0 and 2π."""
+        return random.uniform(0, 2 * math.pi)  # Rotation around z-axis
 
+    positions_and_orientations = []  # List to store positions and orientations
+
+    while len(positions_and_orientations) < num_samples:
+        # Sample random x, y position within the grid (assuming grid is 10x10)
+        x = random.uniform(0, grid_size - 1)  # Ensure positions are between 0 and 9
+        y = random.uniform(0, grid_size - 1)
+        z = 0  # The cubes are on the ground, so z is always 0
+        
+        # Sample random z-axis rotation (roll)
+        roll = random_z_rotation()
+        
+        # The cube is not rotated around x or y axes, so pitch and yaw are fixed to 0
+        pitch, yaw = 0, 0
+        
+        # Store the position and orientation
+        positions_and_orientations.append(((x, y, z), (pitch, yaw, roll)))
+
+    return positions_and_orientations
+
+NUM_GATES=9
 class HoverEnv:
     def __init__(self, num_envs, env_cfg, obs_cfg, reward_cfg, command_cfg, show_viewer=False):
         self.num_envs = num_envs
@@ -59,24 +84,13 @@ class HoverEnv:
 
         # add plane
         self.scene.add_entity(gs.morphs.Plane(collision=False))
-
-        # add target
-        if self.env_cfg["visualize_target"]:
-            self.target = self.scene.add_entity(
-                morph=gs.morphs.Mesh(
-                    file="meshes/sphere.obj",
-                    scale=0.05,
-                    fixed=False,
-                    collision=False,
-                ),
-                surface=gs.surfaces.Rough(
-                    diffuse_texture=gs.textures.ColorTexture(
-                        color=(1.0, 0.5, 0.5),
-                    ),
-                ),
-            )
-        else:
-            self.target = None
+        self.pos_and_euler=sample_positions_and_orientations(grid_size=10, num_samples=NUM_GATES)
+        for i in range(NUM_GATES):
+            self.scene.add_entity(gs.morphs.Mesh(file="/home/vybhav/Music/drone_gate.stl",
+                                                 pos=self.pos_and_euler[i][0],
+                                                 euler=self.pos_and_euler[i][1],
+                                                 convexify=False,collision=True, scale=0.25),
+                         vis_mode="collision")
 
         # add camera
         if self.env_cfg["visualize_camera"]:
@@ -132,18 +146,20 @@ class HoverEnv:
         self.base_ang_vel = torch.zeros((self.num_envs, 3), device=gs.device, dtype=gs.tc_float)
         self.last_base_pos = torch.zeros_like(self.base_pos)
         
-        
+        self.command_buffer = torch.zeros((self.num_envs, 3, 3), device=gs.device, dtype=gs.tc_float)
         self.obs_space = {
-            "base_ang_vel":self.base_ang_vel[0],
-            "base_lin_vel":self.base_lin_vel[0],
-            "base_quat":self.base_quat[0],
-            "base_rel_pos":self.base_pos[0],
-            "front_depth":torch.zeros((16, 16, 3)),  # Updated to 16x16
-            "taken_actions":self.actions[0],  # 12
+            "base_ang_vel": self.base_ang_vel[0],
+            "base_lin_vel": self.base_lin_vel[0],
+            "base_quat": self.base_quat[0],
+            "base_rel_pos": self.base_pos[0],
+            "base_rel_pos_1": self.base_pos[0], # Placeholder
+            "base_rel_pos_2": self.base_pos[0], # Placeholder
+            "front_depth": torch.zeros((16, 16, 3)),
+            "taken_actions": self.actions[0],
         }
         self.extras = dict()  # extra information for logging
         self.extras["observations"] = dict()
-        # self.dummy_depth= torch.zeros((self.num_envs,64, 64,3))
+        self.target = None
         
     def get_dummy_observations(self):
         # for key,value in self.obs_buf.items():
@@ -153,11 +169,39 @@ class HoverEnv:
     def get_dummy_actions(self):
         return np.zeros([1, self.num_actions])
 
-    def _resample_commands(self, envs_idx):
-        self.commands[envs_idx, 0] = gs_rand_float(*self.command_cfg["pos_x_range"], (len(envs_idx),), gs.device)
-        self.commands[envs_idx, 1] = gs_rand_float(*self.command_cfg["pos_y_range"], (len(envs_idx),), gs.device)
-        self.commands[envs_idx, 2] = gs_rand_float(*self.command_cfg["pos_z_range"], (len(envs_idx),), gs.device)
+    def _resample_command_buffer(self, envs_idx):
+        if len(envs_idx) == 0:
+            return
+        
+        # Get all possible positions
+        positions = torch.tensor([p[0] for p in self.pos_and_euler], device=self.device, dtype=gs.tc_float)
+        
+        # Sample 3 random indices for each env
+        indices = torch.randint(0, len(self.pos_and_euler), (len(envs_idx), 3), device=self.device)
+        
+        # Assign to buffer
+        self.command_buffer[envs_idx] = positions[indices]
 
+    def _update_command_buffer(self, envs_idx):
+        if len(envs_idx) == 0:
+            return
+            
+        # Shift targets: 0 <- 1, 1 <- 2
+        self.command_buffer[envs_idx, 0] = self.command_buffer[envs_idx, 1]
+        self.command_buffer[envs_idx, 1] = self.command_buffer[envs_idx, 2]
+        
+        # Sample new target for slot 2
+        positions = torch.tensor([p[0] for p in self.pos_and_euler], device=self.device, dtype=gs.tc_float)
+        indices = torch.randint(0, len(self.pos_and_euler), (len(envs_idx),), device=self.device)
+        self.command_buffer[envs_idx, 2] = positions[indices]
+        
+        # Update current command
+        self.commands[envs_idx] = self.command_buffer[envs_idx, 0]
+
+    def _resample_commands(self, envs_idx):
+        self._resample_command_buffer(envs_idx)
+        self.commands[envs_idx] = self.command_buffer[envs_idx, 0]
+        
     def _at_target(self):
         return (
             (torch.norm(self.rel_pos, dim=1) < self.env_cfg["at_target_threshold"])
@@ -197,7 +241,7 @@ class HoverEnv:
 
         # resample commands
         envs_idx = self._at_target()
-        self._resample_commands(envs_idx)
+        self._update_command_buffer(envs_idx)
 
         # check termination and reset
         self.crash_condition = (
@@ -227,12 +271,18 @@ class HoverEnv:
         # print("pcd shape:",self.lidar.read()[0].shape)
         # print("pcd shape:",self.lidar.read()[0].view(self.num_envs, -1).shape)
         # exit(0)
+        # Calculate relative positions for future targets
+        rel_pos_1 = self.command_buffer[:, 1] - self.base_pos
+        rel_pos_2 = self.command_buffer[:, 2] - self.base_pos
+
         self.obs_buf = torch.cat(
             [
                 torch.clip(self.base_ang_vel * self.obs_scales["ang_vel"], -1, 1),
                 torch.clip(self.base_lin_vel * self.obs_scales["lin_vel"], -1, 1),
                 self.base_quat,
                 torch.clip(self.rel_pos * self.obs_scales["rel_pos"], -1, 1),
+                torch.clip(rel_pos_1 * self.obs_scales["rel_pos"], -1, 1),
+                torch.clip(rel_pos_2 * self.obs_scales["rel_pos"], -1, 1),
                 self.lidar.read()[0].view(self.num_envs, -1).detach(),  # Detach sensor data to prevent gradient accumulation
                 self.last_actions,
             ],
