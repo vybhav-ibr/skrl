@@ -43,13 +43,15 @@ def get_cfgs():
         "resampling_time_s": 3.0,
         "simulate_action_latency": True,
         "clip_actions": 1.0,
+        "num_gates": 9,
+        "grid_size": 10,
         # visualization
         "visualize_target": False,
         "visualize_camera": False,
         "max_visualize_FPS": 60,
     }
     obs_cfg = {
-        "num_obs": 785,  # Updated: 16*16*3 (768) + 17 other obs
+        "num_obs": 791,  # Updated: 16*16*3 (768) + 17 other obs
         "obs_scales": {
             "rel_pos": 1 / 3.0,
             "lin_vel": 1 / 3.0,

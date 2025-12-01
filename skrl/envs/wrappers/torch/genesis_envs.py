@@ -58,11 +58,11 @@ class GenesisWrapper(Wrapper):
         :rtype: gymnasium.Space
         """
         if type(spec) is tuple:
-            return gymnasium.spaces.Box(shape=spec[0].shape, dtype=np.float32, low=spec[0], high=spec[1])
+            return gymnasium.spaces.Box(shape=spec[0].shape, dtype=np.float64, low=spec[0], high=spec[1])
         elif isinstance(spec, np.ndarray):
             return gymnasium.spaces.Box(
                 shape=spec.shape,
-                dtype=np.float32,
+                dtype=np.float64,
                 low=np.full(spec.shape, float("-inf")),
                 high=np.full(spec.shape, float("inf")),
             )
@@ -70,7 +70,7 @@ class GenesisWrapper(Wrapper):
             spec.detach().cpu().numpy()
             return gymnasium.spaces.Box(
                 shape=spec.shape,
-                dtype=np.float32,
+                dtype=np.float64,
                 low=np.full(spec.shape, float("-inf")),
                 high=np.full(spec.shape, float("inf")),
             )
@@ -194,11 +194,11 @@ class GenesisMultiAgentWrapper(MultiAgentEnvWrapper):
         :rtype: gymnasium.Space
         """
         if type(spec) is tuple:
-            return gymnasium.spaces.Box(shape=spec[0].shape, dtype=np.float32, low=spec[0], high=spec[1])
+            return gymnasium.spaces.Box(shape=spec[0].shape, dtype=np.float64, low=spec[0], high=spec[1])
         elif isinstance(spec, np.ndarray):
             return gymnasium.spaces.Box(
                 shape=spec.shape,
-                dtype=np.float32,
+                dtype=np.float64,
                 low=np.full(spec.shape, float("-inf")),
                 high=np.full(spec.shape, float("inf")),
             )
@@ -206,7 +206,7 @@ class GenesisMultiAgentWrapper(MultiAgentEnvWrapper):
             spec.detach().cpu().numpy()
             return gymnasium.spaces.Box(
                 shape=spec.shape,
-                dtype=np.float32,
+                dtype=np.float64,
                 low=np.full(spec.shape, float("-inf")),
                 high=np.full(spec.shape, float("inf")),
             )

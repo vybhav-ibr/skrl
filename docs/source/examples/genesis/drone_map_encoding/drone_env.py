@@ -15,31 +15,66 @@ import numpy as np
 def gs_rand_float(lower, upper, shape, device):
     return (upper - lower) * torch.rand(size=shape, device=device) + lower
 
-def sample_positions_and_orientations(grid_size, num_samples):
+def sample_positions_and_orientations(grid_size, num_samples, min_distance=2.5):
+    """
+    Sample positions and orientations with minimum distance constraint.
+    
+    Args:
+        grid_size: Size of the grid
+        num_samples: Number of positions to sample
+        min_distance: Minimum distance between any two positions
+    """
     def random_z_rotation():
-        """Generate a random z-axis rotation (roll) between 0 and 2π."""
-        return random.uniform(0, 2 * math.pi)  # Rotation around z-axis
+        """Generate a random z-axis rotation (roll) between 0 and 360 degrees."""
+        return random.uniform(0, 360)
+    
+    def check_distance(new_pos, existing_positions, min_dist):
+        """Check if new position is at least min_dist away from all existing positions."""
+        for pos in existing_positions:
+            # Calculate 2D distance (ignoring z since all gates are at ground level)
+            dist = math.sqrt((new_pos[0] - pos[0])**2 + (new_pos[1] - pos[1])**2)
+            if dist < min_dist:
+                return False
+        return True
 
-    positions_and_orientations = []  # List to store positions and orientations
-
-    while len(positions_and_orientations) < num_samples:
-        # Sample random x, y position within the grid (assuming grid is 10x10)
-        x = random.uniform(0, grid_size - 1)  # Ensure positions are between 0 and 9
-        y = random.uniform(0, grid_size - 1)
-        z = 0  # The cubes are on the ground, so z is always 0
+    positions = []
+    orientations = []
+    max_attempts = 1000  # Prevent infinite loops
+    
+    while len(positions) < num_samples:
+        attempts = 0
+        valid_position_found = False
         
-        # Sample random z-axis rotation (roll)
-        roll = random_z_rotation()
+        while not valid_position_found and attempts < max_attempts:
+            # Sample random x, y position within the grid
+            x = random.uniform(-grid_size//2, grid_size//2)
+            y = random.uniform(-grid_size//2, grid_size//2)
+            z = 0  # Gates are on the ground
+            
+            new_pos = (x, y, z)
+            
+            # Check if this position is valid (far enough from existing positions)
+            if check_distance(new_pos, positions, min_distance):
+                valid_position_found = True
+                
+                # Sample random z-axis rotation
+                roll = random_z_rotation()
+                pitch, yaw = 0, 0
+                
+                # Store the position and orientation
+                positions.append(new_pos)
+                orientations.append((pitch, yaw, roll))
+            
+            attempts += 1
         
-        # The cube is not rotated around x or y axes, so pitch and yaw are fixed to 0
-        pitch, yaw = 0, 0
-        
-        # Store the position and orientation
-        positions_and_orientations.append(((x, y, z), (pitch, yaw, roll)))
+        if not valid_position_found:
+            # If we couldn't find a valid position after max_attempts, 
+            # reduce min_distance slightly and try again
+            min_distance *= 0.9
+            print(f"Warning: Reduced min_distance to {min_distance:.2f} to fit all gates")
 
-    return positions_and_orientations
+    return positions, orientations
 
-NUM_GATES=9
 class HoverEnv:
     def __init__(self, num_envs, env_cfg, obs_cfg, reward_cfg, command_cfg, show_viewer=False):
         self.num_envs = num_envs
@@ -83,12 +118,13 @@ class HoverEnv:
         )
 
         # add plane
-        self.scene.add_entity(gs.morphs.Plane(collision=False))
-        self.pos_and_euler=sample_positions_and_orientations(grid_size=10, num_samples=NUM_GATES)
-        for i in range(NUM_GATES):
+        self.scene.add_entity(gs.morphs.Plane(collision=True))
+        self.gate_positions,self.gate_orientations=sample_positions_and_orientations(grid_size=env_cfg["grid_size"], num_samples=env_cfg["num_gates"])
+        print(self.gate_orientations[0])
+        for gate_idx in range(env_cfg["num_gates"]):
             self.scene.add_entity(gs.morphs.Mesh(file="/home/vybhav/Music/drone_gate.stl",
-                                                 pos=self.pos_and_euler[i][0],
-                                                 euler=self.pos_and_euler[i][1],
+                                                 pos=self.gate_positions[gate_idx],
+                                                 euler=self.gate_orientations[gate_idx],
                                                  convexify=False,collision=True, scale=0.25),
                          vis_mode="collision")
 
@@ -115,7 +151,7 @@ class HoverEnv:
             min_range=0.1,
             max_range=2.5,
             return_world_frame=False,
-            draw_debug=True,
+            draw_debug=False,
         )
 
         self.lidar = self.scene.add_sensor(gs.sensors.DepthCamera(pattern=gs.sensors.DepthCameraPattern(
@@ -160,6 +196,10 @@ class HoverEnv:
         self.extras = dict()  # extra information for logging
         self.extras["observations"] = dict()
         self.target = None
+
+        # for i in range(2500):
+        #     self.scene.step()
+        # exit(0)
         
     def get_dummy_observations(self):
         # for key,value in self.obs_buf.items():
@@ -174,10 +214,10 @@ class HoverEnv:
             return
         
         # Get all possible positions
-        positions = torch.tensor([p[0] for p in self.pos_and_euler], device=self.device, dtype=gs.tc_float)
+        positions = torch.tensor(self.gate_positions, device=self.device, dtype=gs.tc_float)
         
         # Sample 3 random indices for each env
-        indices = torch.randint(0, len(self.pos_and_euler), (len(envs_idx), 3), device=self.device)
+        indices = torch.randint(0, len(self.gate_positions), (len(envs_idx), 3), device=self.device)
         
         # Assign to buffer
         self.command_buffer[envs_idx] = positions[indices]
@@ -191,15 +231,14 @@ class HoverEnv:
         self.command_buffer[envs_idx, 1] = self.command_buffer[envs_idx, 2]
         
         # Sample new target for slot 2
-        positions = torch.tensor([p[0] for p in self.pos_and_euler], device=self.device, dtype=gs.tc_float)
-        indices = torch.randint(0, len(self.pos_and_euler), (len(envs_idx),), device=self.device)
+        positions = torch.tensor(self.gate_positions, device=self.device, dtype=gs.tc_float)
+        indices = torch.randint(0, len(self.gate_positions), (len(envs_idx),), device=self.device)
         self.command_buffer[envs_idx, 2] = positions[indices]
         
         # Update current command
         self.commands[envs_idx] = self.command_buffer[envs_idx, 0]
 
     def _resample_commands(self, envs_idx):
-        self._resample_command_buffer(envs_idx)
         self.commands[envs_idx] = self.command_buffer[envs_idx, 0]
         
     def _at_target(self):
@@ -265,7 +304,7 @@ class HoverEnv:
         for name, reward_func in self.reward_functions.items():
             rew = reward_func() * self.reward_scales[name]
             self.rew_buf += rew
-            self.episode_sums[name] += rew.detach()  # Detach to prevent gradient accumulation
+            self.episode_sums[name] += rew
 
         # compute observations
         # print("pcd shape:",self.lidar.read()[0].shape)
@@ -283,7 +322,7 @@ class HoverEnv:
                 torch.clip(self.rel_pos * self.obs_scales["rel_pos"], -1, 1),
                 torch.clip(rel_pos_1 * self.obs_scales["rel_pos"], -1, 1),
                 torch.clip(rel_pos_2 * self.obs_scales["rel_pos"], -1, 1),
-                self.lidar.read()[0].view(self.num_envs, -1).detach(),  # Detach sensor data to prevent gradient accumulation
+                self.lidar.read()[0].view(self.num_envs, -1),  # Detach sensor data to prevent gradient accumulation
                 self.last_actions,
             ],
             axis=-1,
@@ -330,6 +369,7 @@ class HoverEnv:
             )
             self.episode_sums[key][envs_idx] = 0.0
 
+        self._resample_command_buffer(envs_idx)
         self._resample_commands(envs_idx)
 
     def reset(self):
