@@ -230,7 +230,7 @@ class Shared(GaussianMixin, DeterministicMixin, Model):
             return DeterministicMixin.act(self, inputs, role)  
 
 memory = MyRandomMemory(
-    memory_size=128,  # Reduced from 1000 to save VRAM (~67KB per env)
+    memory_size=8,  # Match rollouts to avoid training on stale data/excessive batch size
     num_envs=env.num_envs,
     obs_space=env.observation_space,
     exclude_keys=["front_depth"],
@@ -267,10 +267,10 @@ cfg["value_loss_scale"] = 1.0
 cfg["kl_threshold"] = 0
 cfg["rewards_shaper"] = None
 cfg["time_limit_bootstrap"] = False
-cfg["state_preprocessor"] = RunningStandardScaler
-cfg["state_preprocessor_kwargs"] = {"size": env.observation_space, "device": device}
-cfg["value_preprocessor"] = RunningStandardScaler
-cfg["value_preprocessor_kwargs"] = {"size": 1, "device": device}
+# cfg["state_preprocessor"] = RunningStandardScaler
+# cfg["state_preprocessor_kwargs"] = {"size": env.observation_space, "device": device}
+# cfg["value_preprocessor"] = RunningStandardScaler
+# cfg["value_preprocessor_kwargs"] = {"size": 1, "device": device}
 # logging to TensorBoard and write checkpoints (in timesteps)
 cfg["experiment"]["write_interval"] = 60
 cfg["experiment"]["checkpoint_interval"] = 100

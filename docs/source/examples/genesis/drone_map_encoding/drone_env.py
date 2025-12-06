@@ -322,7 +322,7 @@ class HoverEnv:
                 torch.clip(self.rel_pos * self.obs_scales["rel_pos"], -1, 1),
                 torch.clip(rel_pos_1 * self.obs_scales["rel_pos"], -1, 1),
                 torch.clip(rel_pos_2 * self.obs_scales["rel_pos"], -1, 1),
-                self.lidar.read()[0].view(self.num_envs, -1),  # Detach sensor data to prevent gradient accumulation
+                self.lidar.read()[0].view(self.num_envs, -1).detach(),  # Detach sensor data to prevent gradient accumulation
                 self.last_actions,
             ],
             axis=-1,
