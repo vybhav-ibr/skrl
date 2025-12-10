@@ -17,9 +17,6 @@ from skrl.trainers.torch import SequentialTrainer
 from skrl.utils import set_seed
 import gymnasium
 
-import torch.nn.functional as F
-import torchvision.transforms.functional as TF
-from scipy import signal
 import genesis as gs
 from drone_env import HoverEnv
 from my_random_memory import MyRandomMemory

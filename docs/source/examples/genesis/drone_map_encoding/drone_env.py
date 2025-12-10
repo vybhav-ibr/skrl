@@ -122,7 +122,7 @@ class HoverEnv:
         self.gate_positions,self.gate_orientations=sample_positions_and_orientations(grid_size=env_cfg["grid_size"], num_samples=env_cfg["num_gates"])
         print(self.gate_orientations[0])
         for gate_idx in range(env_cfg["num_gates"]):
-            self.scene.add_entity(gs.morphs.Mesh(file="/home/vybhav/Music/drone_gate.stl",
+            self.scene.add_entity(gs.morphs.Mesh(file="drone_gate.stl",
                                                  pos=self.gate_positions[gate_idx],
                                                  euler=self.gate_orientations[gate_idx],
                                                  convexify=False,collision=True, scale=0.25),
