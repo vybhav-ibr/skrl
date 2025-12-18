@@ -135,10 +135,24 @@ class Shared(GaussianMixin, DeterministicMixin, Model):
 
         # ------------------- Output Heads -------------------
         self.mean_layer = nn.Linear(64, self.num_actions)
-        self.log_std_parameter = nn.Parameter(torch.ones(self.num_actions))
+        self.log_std_parameter = nn.Parameter(-torch.ones(self.num_actions))  # Safer noise init
         self.value_layer = nn.Linear(64, 1)
 
+        # Architectural Stability: LayerNorm before attention prevents Softmax overflow
+        # This is essential for attention-based models processing unnormalized sensory data.
+        self.map_norm = nn.LayerNorm(map_feat_dim)
+        self.proprio_norm = nn.LayerNorm(map_feat_dim)
+
         self._shared_output = None  # Cache for shared encoder
+
+        # Weight initialization
+        self.apply(self._init_weights)
+
+    def _init_weights(self, m):
+        if isinstance(m, (nn.Linear, nn.Conv2d)):
+            nn.init.orthogonal_(m.weight, gain=nn.init.calculate_gain('relu'))
+            if m.bias is not None:
+                nn.init.zeros_(m.bias)
         
         # Partial preprocessor for proprioceptive data only
         self.proprio_preprocessor = RunningStandardScaler(size=proprio_dim, device=device)
@@ -149,6 +163,10 @@ class Shared(GaussianMixin, DeterministicMixin, Model):
         Input: (B, L, W, C)
         Output: (B, L*W, map_feat_dim + 1)
         """
+        # THE SOURCE: Handle potential Inf/NaN from Genesis sensors before they enter the CNN
+        # Depth hitting nothing returns Inf; we map it to max range (2.5m)
+        map_scans = torch.nan_to_num(map_scans, nan=0.0, posinf=2.5, neginf=0.0)
+        
         B = map_scans.shape[0]
         x = map_scans.permute(0, 3, 1, 2)  # (B, C, L, W)
 
@@ -202,6 +220,10 @@ class Shared(GaussianMixin, DeterministicMixin, Model):
         # ------------------- Encode Proprio -------------------
         proprio_encoded = self.proprio_linear(proprio)  # (B, map_feat_dim)
 
+        # Standard Stabilization for Attention:
+        map_encoded = self.map_norm(map_encoded)
+        proprio_encoded = self.proprio_norm(proprio_encoded)
+
         # ------------------- Multi-Head Attention -------------------
         # Query = proprio (context vector)
         # Key, Value = map (spatial features)
@@ -222,8 +244,9 @@ class Shared(GaussianMixin, DeterministicMixin, Model):
 
         # ------------------- Heads -------------------
         if role == "policy":
-            # Detach to prevent gradient accumulation in cache
-            self._shared_output = shared_out.detach()  # cache for value
+            # DO NOT .detach() here. To train a shared encoder effectively, 
+            # we need gradients from BOTH policy and value heads.
+            self._shared_output = shared_out 
             return self.mean_layer(shared_out), self.log_std_parameter, {}
 
         elif role == "value":
@@ -259,7 +282,7 @@ cfg["learning_epochs"] = 5
 cfg["mini_batches"] = 4  # 24 * 4096 / 24576
 cfg["discount_factor"] = 0.99
 cfg["lambda"] = 0.95
-cfg["learning_rate"] = 1e-3
+cfg["learning_rate"] = 5e-4
 cfg["learning_rate_scheduler"] = KLAdaptiveLR
 cfg["learning_rate_scheduler_kwargs"] = {"kl_threshold": 0.01}
 cfg["random_timesteps"] = 0
