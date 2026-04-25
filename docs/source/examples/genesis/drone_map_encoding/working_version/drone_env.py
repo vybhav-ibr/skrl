@@ -141,6 +141,7 @@ class HoverEnv:
             grid_size   = env_cfg["grid_size"],
             num_samples = env_cfg["num_gates"],
         )
+        print(f"[gate_spawn] first gate orientation: {self.gate_orientations[0]}")
 
         for gate_idx in range(env_cfg["num_gates"]):
             self.scene.add_entity(
@@ -196,15 +197,11 @@ class HoverEnv:
 
         # build
         self.scene.build(n_envs=num_envs)
-        self.drone.set_dofs_damping(torch.tensor([0.0, 0.0, 0.0, 1e-4, 1e-4, 1e-4]))
 
         # ------------------------------------------------------------------ rewards
         self.reward_functions, self.episode_sums = dict(), dict()
         for name in self.reward_scales.keys():
-            # Multiply continuous rewards by dt so total reward is time-integrated.
-            # Terminal/one-time rewards (like crash) should not be scaled by dt.
-            if name not in ["crash"]:
-                self.reward_scales[name] *= self.dt
+            self.reward_scales[name]  *= self.dt
             self.reward_functions[name] = getattr(self, "_reward_" + name)
             self.episode_sums[name]    = torch.zeros((self.num_envs,), device=gs.device, dtype=gs.tc_float)
 
@@ -223,16 +220,15 @@ class HoverEnv:
         self.base_lin_vel  = torch.zeros((self.num_envs, 3), device=gs.device, dtype=gs.tc_float)
         self.base_ang_vel  = torch.zeros((self.num_envs, 3), device=gs.device, dtype=gs.tc_float)
         self.last_base_pos = torch.zeros_like(self.base_pos)
-        self.last_base_euler = torch.zeros_like(self.base_euler)
 
         # command_buffer: [current, next, next+1]
         self.command_buffer = torch.zeros((self.num_envs, command_cfg["num_poses"], 3), device=gs.device, dtype=gs.tc_float)
 
-        # obs_space: 3+3+3+3+3+3+256+4 = 278
+        # obs_space: 3+3+4+3+3+3+256+4 = 279
         self.obs_space = {
             "base_ang_vel":   self.base_ang_vel[0],                     # 3
             "base_lin_vel":   self.base_lin_vel[0],                     # 3
-            "base_euler":     self.base_euler[0],                        # 3
+            "base_euler":     self.base_euler[0],                        # 4
             "base_rel_pos":   self.base_pos[0],                         # 3
             "base_rel_pos_1": self.base_pos[0],                         # 3
             "base_rel_pos_2": self.base_pos[0],                         # 3
@@ -338,10 +334,11 @@ class HoverEnv:
     # ------------------------------------------------------------------
 
     def step(self, actions):
+        # print("[step] actions: mean {:.3f}, max {:.3f}, min {:.3f}".format(actions.mean(), actions.max(), actions.min()))
         self.actions  = torch.clip(actions, -self.env_cfg["clip_actions"], self.env_cfg["clip_actions"])
         exec_actions  = self.actions
 
-        self.drone.set_propellers_rpm((1 + exec_actions * 0.8) * 14468.429183500699)
+        self.drone.set_propellels_rpm((1 + exec_actions * 0.8) * 14468.429183500699)
         if self.target is not None:
             self.target.set_pos(self.commands, zero_velocity=True)
         self.scene.step()
@@ -402,12 +399,12 @@ class HoverEnv:
         depth_max  = 7.5
         depth_norm = torch.log1p(depth_raw) / math.log1p(depth_max)
 
-        # obs_buf: 3+3+3+3+3+3+256+4 = 278
+        # obs_buf: 3+3+4+3+3+3+256+4 = 279
         self.obs_buf = torch.cat(
             [
                 torch.clip(self.base_ang_vel * self.obs_scales["ang_vel"], -1, 1),   # 3
                 torch.clip(self.base_lin_vel * self.obs_scales["lin_vel"], -1, 1),   # 3
-                self.base_euler / 180.0,                                             # 3
+                self.base_euler,                                                     # 3
                 torch.clip(self.rel_pos   * self.obs_scales["rel_pos"], -1, 1),       # 3
                 torch.clip(rel_pos_1      * self.obs_scales["rel_pos"], -1, 1),       # 3
                 torch.clip(rel_pos_2      * self.obs_scales["rel_pos"], -1, 1),       # 3
@@ -416,11 +413,8 @@ class HoverEnv:
             ],
             axis=-1,
         )
-        # Numerical safety: replace any NaNs in observations with 0
-        self.obs_buf = torch.nan_to_num(self.obs_buf, nan=0.0, posinf=1.0, neginf=-1.0)
 
         self.last_actions[:]                        = self.actions[:]
-        self.last_base_euler[:]                      = self.base_euler[:]
         self.extras["observations"]["critic"]       = self.obs_buf
         return self.obs_buf, self.rew_buf, self.reset_buf, self.extras
 
@@ -486,7 +480,6 @@ class HoverEnv:
 
         # reset episode state
         self.last_actions[envs_idx]   = 0.0
-        # print(self.episode_length_buf[envs_idx])
         self.episode_length_buf[envs_idx] = 0
         self.reset_buf[envs_idx]      = True
 
@@ -517,9 +510,6 @@ class HoverEnv:
 
     def _reward_smooth(self):
         return torch.sum(torch.square(self.actions - self.last_actions), dim=1)
-    
-    def _reward_smooth_euler(self):
-        return torch.sum(torch.square((self.base_euler - self.last_base_euler) / 180.0), dim=1)
 
     def _reward_yaw(self):
         yaw = self.base_euler[:, 2]

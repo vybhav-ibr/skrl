@@ -55,7 +55,7 @@ def get_cfgs():
         },
     }
     reward_cfg = {
-        "yaw_lambda": -3.0,
+        "yaw_lambda": -10.0,
         "reward_scales": {
             "target": 10.0,
             "smooth": -5e-4,
@@ -226,15 +226,20 @@ class Shared(GaussianMixin, DeterministicMixin, Model):
 
     def compute(self, inputs, role):
         states = inputs["states"]
-        
-        # Efficient direct slicing based on obs_buf layout:
-        # [ang(3), lin(3), euler(3), pos0(3), pos1(3), pos2(3), depth(256), actions(4)]
-        map_scans = states[:, 18:274].view(-1, 16, 16)
-        
+        space  = self.tensor_to_space(states, self.observation_space)
+
+        # Extract observations
+        map_scans = space["front_depth"]     # (B, 16, 16) — scalar depth per pixel
+
         proprio = torch.cat([
-            states[:, 0:18],   # ang, lin, euler, rel_pos0, rel_pos1, rel_pos2
-            states[:, 274:278]  # last_actions
-        ], dim=-1)
+            space["base_ang_vel"],           # (B, 3)
+            space["base_lin_vel"],           # (B, 3)
+            space["base_euler"],              # (B, 3)
+            space["base_rel_pos"],           # (B, 3)  — current waypoint
+            space["base_rel_pos_1"],         # (B, 3)  — next waypoint
+            space["base_rel_pos_2"],         # (B, 3)  — waypoint after next
+            space["taken_actions"],          # (B, 4)
+        ], dim=-1)                           # (B, 23)
 
         # Proprioception embedding — this is the MHA query
         proprio_emb = self.proprio_linear(proprio)   # (B, d)
@@ -242,7 +247,7 @@ class Shared(GaussianMixin, DeterministicMixin, Model):
         # Map encoding via CNN + MHA
         map_enc = self._encode_map(map_scans, proprio_emb)  # (B, d)
 
-        # MLP trunk: concat map encoding with raw proprioception
+        # MLP trunk: concat map encoding with raw proprioception (matches paper Fig 8B)
         mlp_input  = torch.cat([map_enc, proprio], dim=-1)  # (B, d + proprio_dim)
         shared_out = self.mlp(mlp_input)                     # (B, 64)
 
@@ -298,13 +303,13 @@ models["policy"] = Shared(env.observation_space, env.action_space, device)
 models["value"]  = models["policy"]  # shared instance — same encoder, same MLP trunk
 
 memory = RandomMemory(
-    memory_size=16,         # must match cfg["rollouts"]
+    memory_size=8,         # must match cfg["rollouts"]
     num_envs=env.num_envs,
     device=device,
 )
 
 cfg = PPO_DEFAULT_CONFIG.copy()
-cfg["rollouts"]          = 16
+cfg["rollouts"]          = 8
 cfg["learning_epochs"]   = 5
 cfg["mini_batches"]      = 4
 cfg["discount_factor"]   = 0.99
@@ -318,13 +323,13 @@ cfg["grad_norm_clip"]    = 1.0
 cfg["ratio_clip"]        = 0.2
 cfg["value_clip"]        = 0.2
 cfg["clip_predicted_values"] = True
-cfg["entropy_loss_scale"]    = 0.005 # slightly lower entropy for more stability
+cfg["entropy_loss_scale"]    = 0.0
 cfg["value_loss_scale"]      = 1.0
 cfg["kl_threshold"]          = 0
 cfg["rewards_shaper"]        = None
 cfg["time_limit_bootstrap"]  = False
-cfg["experiment"]["write_interval"]      = 100
-cfg["experiment"]["checkpoint_interval"] = 500
+cfg["experiment"]["write_interval"]      = 60
+cfg["experiment"]["checkpoint_interval"] = 100
 cfg["experiment"]["directory"] = "runs/torch/Genesis-Goto-Drone"
 
 agent = PPO(
